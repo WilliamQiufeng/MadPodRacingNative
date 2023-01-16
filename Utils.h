@@ -48,7 +48,15 @@ inline double RadToDeg(double rad) { return rad * 180 / M_PI; }
 
 inline double SinN(double x) { return sin(x * M_PI / 2); }  // [0..1] maps to [0..1]
 inline size_t Cycle(int i, size_t n) { return (size_t) (i < 0 ? i + n : i % n); }
-
+inline double ClampRadian(double rad) {
+    while (rad < -M_PI) rad += M_PI * 2;
+    while (rad > M_PI) rad -= M_PI * 2;
+    return rad;
+}
+//inline double BestRotation(double rad) {
+//    rad = ClampRadian(rad);
+//
+//}
 struct Vec {
     double x, y;
 

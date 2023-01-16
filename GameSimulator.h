@@ -40,6 +40,7 @@ struct Pod {
     PodEncodeInfo Encode();
     void UpdateVelocity();
     double CheckCollision(const Pod& other) const;
+    bool IsEnabled() const;
 };
 class GameSimulator {
 public:

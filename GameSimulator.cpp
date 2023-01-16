@@ -59,11 +59,15 @@ void GameSimulator::UpdatePodAI(int podIndex) {
 void Pod::UpdateVelocity() {
     // Update position
     auto idealDirection = TargetPosition - Position;
-    auto rotateDegree = Bound<double>(idealDirection.Angle() - Facing, DegToRad(-18), DegToRad(18));
+    auto rotateDegree = Bound<double>(ClampRadian(idealDirection.Angle() - Facing), DegToRad(-18), DegToRad(18));
     auto thrust = Thrust;
     if (Boost) {
         thrust = Boosted ? 100 : 650;
         Boosted = true;
+    }
+    if (ShieldCD) {
+        thrust = 0;
+        ShieldCD --;
     }
     Mass = ShieldCD ? Pod::ShieldMass : Pod::NormalMass;
     Facing += rotateDegree;
@@ -80,8 +84,18 @@ double Pod::CheckCollision(const Pod& other) const {
 //    return minTime;
     for (int ti = 0; ti <= 10; ti++) {
         auto t = 0.1 * ti;
-        // Todo: Ternary search for accurate result
-        if ((dp + dv * t).SqDist() <= DiameterSq) return t;
+        if ((dp + dv * t).SqDist() <= DiameterSq) {
+            double l = 0, r = t, mid = r / 2;
+            while (abs(r - l) > 1e-4) {
+                if ((dp + dv * mid).SqDist() < DiameterSq) {
+                    r = mid;
+                } else {
+                    l = mid;
+                }
+                mid = (l + r) / 2;
+            }
+            return mid;
+        }
     }
     return -1;
 }
@@ -91,14 +105,15 @@ bool GameSimulator::Tick() {
     for (int i = 0; i < PodsPerSide * 2; i++) {
         auto& pod = Pods[i];
         // 100+ turns not reaching a checkpoint: dead
-        if (pod.IsOut || pod.Finished) continue;
+        if (!pod.IsEnabled()) continue;
         // Check checkpoint collision
         if ((pod.Position - Checkpoints[pod.NextCheckpointIndex]).SqDist() <= CPRadiusSq) {
             pod.NextCheckpointIndex++;
             if (pod.NextCheckpointIndex >= Checkpoints.size()) {
                 pod.NextCheckpointIndex = 0;
                 pod.Lap ++;
-                if (pod.Lap >= TotalLaps) {
+                // Goes back to first checkpoint after all laps
+                if (pod.Lap >= TotalLaps && pod.NextCheckpointIndex != 0) {
                     pod.Finished = true;
                     continue;
                 }
@@ -121,6 +136,7 @@ bool GameSimulator::Tick() {
         for (int j = 0; j < PodsPerSide * 2; j++) {
             if (i == j) continue; // Not colliding itself obviously
             auto& anotherPod = Pods[j];
+            if (!anotherPod.IsEnabled()) continue;
             auto collideTime = pod.CheckCollision(anotherPod);
             if (collideTime < 0 || collideTime > 1) continue;
             // Before collision
@@ -179,6 +195,10 @@ PodEncodeInfo Pod::Encode() {
     res.vy = Velocity.y / GameSimulator::FieldSize.y;
     res.m = Mass / ShieldMass;
     return res;
+}
+
+bool Pod::IsEnabled() const {
+    return !IsOut && !Finished;
 }
 
 GA::GA() : RNG(RandomDevice()), DistributionX(0, GameSimulator::FieldSize.x), DistributionY(0, GameSimulator::FieldSize.y){
