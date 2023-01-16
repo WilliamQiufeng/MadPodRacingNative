@@ -6,17 +6,17 @@
 #include "GameSimulator.h"
 
 #ifdef _MSC_VER
-#define export extern "C" __declspec( dllexport )
+#define export_fn extern "C" __declspec( dllexport )
 #else
-#define export extern "C"
+#define export_fn extern "C"
 #endif
 
-export bool Entry() {
+export_fn bool Entry() {
     std::cout << "MadPodRacing C++" << std::endl;
     return true;
 }
 
-export int TestMethod() {
+export_fn int TestMethod() {
     std::cout << "Hello, World!" << std::endl;
     ANNUsed ann;
     ann.InitializeSpace({12, 8, 8, 4});
@@ -29,19 +29,49 @@ export int TestMethod() {
     return 20;
 }
 
-export intptr_t GSCreate(int podsPerSide, int totalLaps) {
-    return (std::intptr_t)new GameSimulator(podsPerSide, totalLaps);
+export_fn intptr_t GSCreate(int podsPerSide, int totalLaps) {
+    return (std::intptr_t) new GameSimulator(podsPerSide, totalLaps);
 }
-export void GSSetup(intptr_t sim, Vec* start, int len) {
-    auto gameSim = (GameSimulator*)sim;
+export_fn void GSSetup(intptr_t sim, Vec *start, int len) {
+    auto gameSim = (GameSimulator *) sim;
     gameSim->Setup(std::vector(start, start + len));
 }
-export bool GSTick(intptr_t sim) {
-    return ((GameSimulator*)sim)->Tick();
+export_fn bool GSTick(intptr_t sim) {
+    return ((GameSimulator *) sim)->Tick();
 }
-export Pod* GSGetPod(intptr_t sim, int idx) {
-    return &((GameSimulator*)sim)->Pods[idx];
+export_fn Pod *GSGetPod(intptr_t sim, int idx) {
+    return &((GameSimulator *) sim)->Pods[idx];
 }
-export Vec* GSGetCP(intptr_t sim, int idx) {
-    return &((GameSimulator*)sim)->Checkpoints[idx];
+export_fn Vec *GSGetCP(intptr_t sim, int idx) {
+    return &((GameSimulator *) sim)->Checkpoints[idx];
+}
+
+export_fn intptr_t GACreate() {
+    return (std::intptr_t) new GAUsed;
+}
+
+export_fn void GAInitialize(intptr_t ga, int* nodes, int len) {
+    std::array<int, ANNUsed::LayersCount> nodesArr{};
+    for (int i = 0; i < len; i++) {
+        nodesArr[i] = nodes[i];
+    }
+    ((GAUsed*)ga)->Initialize(nodesArr);
+}
+export_fn bool GATick(intptr_t ga) {
+    return ((GAUsed*)ga)->Tick();
+}
+export_fn bool GAGeneration(intptr_t ga) {
+    return ((GAUsed*)ga)->Generation();
+}
+export_fn void GAGenerationStart(intptr_t ga) {
+    ((GAUsed*)ga)->GenerationStart();
+}
+export_fn void GAGenerationEnd(intptr_t ga) {
+    ((GAUsed*)ga)->GenerationEnd();
+}
+export_fn Vec* GAGetCheckpoint(intptr_t ga, int idx) {
+    return &((GAUsed*)ga)->Checkpoints[idx];
+}
+export_fn intptr_t GAGetSimulators(intptr_t ga, int idx) {
+    return (intptr_t)&((GAUsed*)ga)->Checkpoints[idx];
 }

@@ -4,12 +4,14 @@
 
 #include "GameSimulator.h"
 
+#include <utility>
+
 GameSimulator::GameSimulator(int podsPerSide, int totalLaps = 3) : PodsPerSide(podsPerSide), TotalLaps(totalLaps) {
 
 }
 
 void GameSimulator::Setup(std::vector<Vec> checkpoints) {
-    Checkpoints = checkpoints;
+    Checkpoints = std::move(checkpoints);
     Pods.reset(new Pod[PodsPerSide * 2]);
     for (int i = 0; i < PodsPerSide * 2; i++) {
         Pods[i] = Pod{
@@ -170,11 +172,35 @@ bool GameSimulator::Tick() {
         if (pod.Finished) return false;
         if (!pod.IsOut) allOut = false;
     }
+    if (!allOut) CurrentTick++;
     return !allOut;
 }
 
 void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann) {
     ANNController = std::move(ann);
+}
+
+double GameSimulator::Fitness() {
+    if (CalculatedFitness != -1) return CalculatedFitness;
+    CalculatedFitness = 0;
+    for (int i = 0; i < PodsPerSide * 2; i++) {
+        auto& pod = Pods[i];
+        CalculatedFitness += (pod.Lap * Checkpoints.size() + pod.NextCheckpointIndex) / (double)CurrentTick;
+        if (pod.IsOut) continue;
+        if (pod.Finished) CalculatedFitness += 0.02; // ?
+        if (pod.Boosted) CalculatedFitness += 0.01;
+    }
+    return CalculatedFitness;
+}
+
+bool GameSimulator::Compare(GameSimulator& a, GameSimulator& b) {
+    return a.Fitness() < b.Fitness();
+}
+
+void GameSimulator::Reset(std::vector<Vec> cp) {
+    Setup(cp);
+    CurrentTick = 1;
+    CalculatedFitness = -1;
 }
 
 GameSimulator::GameSimulator() = default;
@@ -188,7 +214,7 @@ void PodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) {
 }
 
 PodEncodeInfo Pod::Encode() {
-    PodEncodeInfo res;
+    PodEncodeInfo res{};
     res.x = Position.x / GameSimulator::FieldSize.x;
     res.y = Position.y / GameSimulator::FieldSize.y;
     res.vx = Velocity.x / GameSimulator::FieldSize.x;
@@ -199,8 +225,4 @@ PodEncodeInfo Pod::Encode() {
 
 bool Pod::IsEnabled() const {
     return !IsOut && !Finished;
-}
-
-GA::GA() : RNG(RandomDevice()), DistributionX(0, GameSimulator::FieldSize.x), DistributionY(0, GameSimulator::FieldSize.y){
-
 }

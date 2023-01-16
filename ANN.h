@@ -14,6 +14,7 @@ template<int Layers>
 class ANN {
     using carr = std::unique_ptr<float[]>;
 public:
+    constexpr static const int LayersCount = Layers;
     std::array<int, Layers + 1> NeuronOffset;
     std::array<int, Layers> WeightOffset;
     carr Weights;
@@ -84,6 +85,11 @@ public:
             Biases[i] = Distribution(RNG);
         }
     };
+
+    void Mate(const ANN<Layers>& another, const ANN<Layers>& to, float co_p, float mut_p) {
+        Crossover(another, to, co_p);
+        Mutate(to, mut_p);
+    }
 
     void Crossover(const ANN<Layers>& another, const ANN<Layers>& to, float probability) {
         Crossover(Weights, another.Weights, to.Weights, WeightCount, probability);
