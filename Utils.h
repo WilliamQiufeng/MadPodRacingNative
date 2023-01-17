@@ -118,5 +118,27 @@ inline std::pair<Vec, Vec> ElasticCollision(double m1, double m2, Vec u1, Vec u2
             factor * (2 * m1 * u1 + m2 * u2 - m1 * u2)
     };
 }
+inline std::pair<Vec, Vec> ElasticCollision(double m1, double m2, Vec u1, Vec u2, Vec p1, Vec p2) {
+    Vec j = (p1 - p2).Unit();
+    Vec R = 2 / (m1 + m2) * j.Dot(u2 - u1) * j;
+    return {
+        u1 + m2 * R,
+        u2 - m1 * R
+    };
+}
+inline double CollisionTime(Vec v1, Vec v2, Vec p1, Vec p2, double r1, double r2) {
+    Vec dv = v1 - v2;
+    Vec dp = p1 - p2;
+    double pv = dp.Dot(dv);
+    double vv = dv.SqDist();
+    double pp = dp.SqDist();
+    double delta = pv * pv - vv * (pp - (r1 + r2) * (r1 + r2));
+    if (delta < 0) return -1;
+    double t1 = (- pv - delta) / vv;
+    double t2 = (- pv + delta) / vv;
+    if (t1 >= 0) return t1;
+    else if (t2 >= 0) return t2;
+    else return -1;
+}
 
 #endif //MADPODRACING_UTILS_H

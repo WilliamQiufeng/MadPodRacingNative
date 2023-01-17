@@ -14,9 +14,10 @@ void GameSimulator::Setup(std::vector<Vec> checkpoints) {
     Checkpoints = std::move(checkpoints);
     Pods.reset(new Pod[PodsPerSide * 2]);
     for (int i = 0; i < PodsPerSide * 2; i++) {
+        Vec pos = Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
         Pods[i] = Pod{
-                Checkpoints[0],
-                Checkpoints[0],
+                pos,
+                pos,
                 {0, 0},
                 0,
                 {0, 0},
@@ -69,7 +70,7 @@ void Pod::UpdateVelocity() {
     }
     if (ShieldCD) {
         thrust = 0;
-        ShieldCD --;
+        ShieldCD--;
     }
     Mass = ShieldCD ? Pod::ShieldMass : Pod::NormalMass;
     Facing += rotateDegree;
@@ -113,12 +114,12 @@ bool GameSimulator::Tick() {
             pod.NextCheckpointIndex++;
             if (pod.NextCheckpointIndex >= Checkpoints.size()) {
                 pod.NextCheckpointIndex = 0;
-                pod.Lap ++;
-                // Goes back to first checkpoint after all laps
-                if (pod.Lap >= TotalLaps && pod.NextCheckpointIndex != 0) {
-                    pod.Finished = true;
-                    continue;
-                }
+                pod.Lap++;
+            }
+            // Goes back to first checkpoint after all laps
+            if (pod.Lap >= TotalLaps && pod.NextCheckpointIndex != 0) {
+                pod.Finished = true;
+                continue;
             }
             pod.NonCPTicks = 0;
         } else {
@@ -140,7 +141,7 @@ bool GameSimulator::Tick() {
             auto& anotherPod = Pods[j];
             if (!anotherPod.IsEnabled()) continue;
             auto collideTime = pod.CheckCollision(anotherPod);
-            if (collideTime < 0 || collideTime > 1) continue;
+            if (collideTime <= 0 || collideTime > 1) continue;
             // Before collision
             pod.Position += pod.Velocity * collideTime;
             anotherPod.Position += anotherPod.Velocity * collideTime;
@@ -185,7 +186,7 @@ double GameSimulator::Fitness() {
     CalculatedFitness = 0;
     for (int i = 0; i < PodsPerSide * 2; i++) {
         auto& pod = Pods[i];
-        CalculatedFitness += (pod.Lap * Checkpoints.size() + pod.NextCheckpointIndex) / (double)CurrentTick;
+        CalculatedFitness += (pod.Lap * Checkpoints.size() + pod.NextCheckpointIndex) / (double) CurrentTick;
         if (pod.IsOut) continue;
         if (pod.Finished) CalculatedFitness += 0.02; // ?
         if (pod.Boosted) CalculatedFitness += 0.01;
@@ -201,6 +202,11 @@ void GameSimulator::Reset(std::vector<Vec> cp) {
     Setup(cp);
     CurrentTick = 1;
     CalculatedFitness = -1;
+}
+
+double GameSimulator::RecalculateFitness() {
+    CalculatedFitness = -1;
+    return Fitness();
 }
 
 GameSimulator::GameSimulator() = default;

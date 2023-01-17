@@ -76,6 +76,8 @@ public:
 
     double Fitness();
 
+    double RecalculateFitness();
+
     static bool Compare(GameSimulator& a, GameSimulator& b);
 };
 
