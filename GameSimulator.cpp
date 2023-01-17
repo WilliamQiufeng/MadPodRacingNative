@@ -79,28 +79,55 @@ void Pod::UpdateVelocity() {
 
 
 double Pod::CheckCollision(const Pod& other) const {
-    auto dp = Position - other.Position;
-    auto dv = Velocity - other.Velocity;
-//    auto minTime = -dp.Dot(dv) / dv.Dot(dv);
-//    auto minSqDist = (dv * minTime + dp).SqDist();
-//    if (minTime < 0 || minSqDist > DiameterSq) return -1;
-//    return minTime;
-    for (int ti = 0; ti <= 10; ti++) {
-        auto t = 0.1 * ti;
-        if ((dp + dv * t).SqDist() <= DiameterSq) {
-            double l = 0, r = t, mid = r / 2;
-            while (abs(r - l) > 1e-4) {
-                if ((dp + dv * mid).SqDist() < DiameterSq) {
-                    r = mid;
-                } else {
-                    l = mid;
+    return CollisionTime(Velocity, other.Velocity, Position, other.Position, Radius, Radius);
+}
+
+void GameSimulator::MoveAndCollide() {
+    const double maxTime = 1e9;
+    double minNextCldTime = maxTime;
+    int mctI, mctJ; // if min exists, the two collided object index
+    int lastI = -1, lastJ = -1;
+    double remainTime = 1;
+    // O(N^2?)
+    while (remainTime > 0) {
+        for (int i = 0; i < PodsPerSide * 2; i++) {
+            auto& pod = Pods[i];
+            if (!pod.IsEnabled()) continue;
+            for (int j = i + 1; j < PodsPerSide * 2; j++) {
+                auto& anotherPod = Pods[j];
+                if (!pod.IsEnabled()) continue;
+                if (i == lastI && j == lastJ) continue;
+                auto collideTime = pod.CheckCollision(anotherPod);
+                if (collideTime <= 0 || collideTime > remainTime) continue;
+                if (collideTime < minNextCldTime) {
+                    mctI = i;
+                    mctJ = j;
+                    minNextCldTime = collideTime;
                 }
-                mid = (l + r) / 2;
             }
-            return mid;
         }
+        if (minNextCldTime > remainTime) { // No more collisions
+            for (int i = 0; i < PodsPerSide * 2; i++) {
+                auto& pod = Pods[i];
+                if (!pod.IsEnabled()) continue;
+                pod.Position += pod.Velocity * remainTime;
+            }
+            break;
+        }
+        for (int i = 0; i < PodsPerSide * 2; i++) {
+            auto& pod = Pods[i];
+            if (!pod.IsEnabled()) continue;
+            pod.Position += pod.Velocity * minNextCldTime;
+        }
+        auto& pi = Pods[mctI], & pj = Pods[mctJ];
+        auto [v1, v2] = ElasticCollision(pi.Mass, pj.Mass, pi.Velocity, pj.Velocity, pi.Position, pj.Position);
+        pi.Velocity = v1;
+        pj.Velocity = v2;
+        remainTime -= minNextCldTime;
+        minNextCldTime = maxTime;
+        lastI = mctI;
+        lastJ = mctJ;
     }
-    return -1;
 }
 
 
@@ -132,33 +159,7 @@ bool GameSimulator::Tick() {
         pod.UpdateVelocity();
         pod.IsCollided = false;
     }
-    for (int i = 0; i < PodsPerSide * 2; i++) {
-        auto& pod = Pods[i];
-        if (pod.IsOut || pod.Finished || pod.IsCollided) continue;
-        // O(N^2)
-        for (int j = 0; j < PodsPerSide * 2; j++) {
-            if (i == j) continue; // Not colliding itself obviously
-            auto& anotherPod = Pods[j];
-            if (!anotherPod.IsEnabled()) continue;
-            auto collideTime = pod.CheckCollision(anotherPod);
-            if (collideTime <= 0 || collideTime > 1) continue;
-            // Before collision
-            pod.Position += pod.Velocity * collideTime;
-            anotherPod.Position += anotherPod.Velocity * collideTime;
-            // Collision happens: change velocities
-            auto [v1, v2] = ElasticCollision(pod.Mass, anotherPod.Mass, pod.Velocity, anotherPod.Velocity);
-            pod.Velocity = MinImpulse(120, pod.Mass, v1);
-            anotherPod.Velocity = MinImpulse(120, anotherPod.Mass, v2);
-            // After collision
-            pod.Position += pod.Velocity * (1 - collideTime);
-            anotherPod.Position += anotherPod.Velocity * (1 - collideTime);
-            pod.IsCollided = anotherPod.IsCollided = true;
-            break;
-        }
-        // No collision happens
-        if (!pod.IsCollided)
-            pod.Position += pod.Velocity;
-    }
+    MoveAndCollide();
     // Finishing work
     for (int i = 0; i < PodsPerSide * 2; i++) {
         auto& pod = Pods[i];

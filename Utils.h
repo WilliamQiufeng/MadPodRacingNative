@@ -21,6 +21,16 @@ inline T Bound(T v, T lb, T ub) {
     if (v > ub) return ub;
     return v;
 }
+// Given lb < 0, ub > 0,
+// OutSignBound(v) =    lb  if v > lb and v < 0
+//                      ub  if v < ub and v > 0
+//                      v   otherwise
+template<typename T>
+inline T OutSignBound(T v, T lb, T ub) {
+    if (v > lb && v < 0) return lb;
+    if (v < ub && v > 0) return ub;
+    return v;
+}
 
 template<typename T>
 inline T MapVal(T v, T a, T b, T c, T d) {
@@ -118,12 +128,13 @@ inline std::pair<Vec, Vec> ElasticCollision(double m1, double m2, Vec u1, Vec u2
             factor * (2 * m1 * u1 + m2 * u2 - m1 * u2)
     };
 }
-inline std::pair<Vec, Vec> ElasticCollision(double m1, double m2, Vec u1, Vec u2, Vec p1, Vec p2) {
+inline std::pair<Vec, Vec> ElasticCollision(double m1, double m2, Vec u1, Vec u2, Vec p1, Vec p2, double minImpulse = 120) {
     Vec j = (p1 - p2).Unit();
-    Vec R = 2 / (m1 + m2) * j.Dot(u2 - u1) * j;
+    double Jmod = OutSignBound(2 * m1 * m2 / (m1 + m2) * j.Dot(u2 - u1), -minImpulse, minImpulse);
+    Vec J = Jmod * j;
     return {
-        u1 + m2 * R,
-        u2 - m1 * R
+        u1 + 1 / m1 * J,
+        u2 - 1 / m2 * J
     };
 }
 inline double CollisionTime(Vec v1, Vec v2, Vec p1, Vec p2, double r1, double r2) {
@@ -134,10 +145,11 @@ inline double CollisionTime(Vec v1, Vec v2, Vec p1, Vec p2, double r1, double r2
     double pp = dp.SqDist();
     double delta = pv * pv - vv * (pp - (r1 + r2) * (r1 + r2));
     if (delta < 0) return -1;
-    double t1 = (- pv - delta) / vv;
-    double t2 = (- pv + delta) / vv;
-    if (t1 >= 0) return t1;
-    else if (t2 >= 0) return t2;
+    double sqrtDelta = std::sqrt(delta);
+    double t1 = (- pv - sqrtDelta) / vv;
+    double t2 = (- pv + sqrtDelta) / vv;
+    if (t1 >= 0 && t1 <= 1) return t1;
+    else if (t2 >= 0 && t2 <= 1) return t2;
     else return -1;
 }
 

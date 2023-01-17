@@ -68,6 +68,8 @@ public:
 
     void Setup(std::vector<Vec> checkpoints);
 
+    void MoveAndCollide();
+
     void UpdatePodAI(int podIndex);
 
     bool Tick();

@@ -85,3 +85,8 @@ export_fn Vec *GAGetCheckpoint(intptr_t ga, int idx) {
 export_fn intptr_t GAGetSimulators(intptr_t ga, int idx) {
     return (intptr_t) &((GAUsed *) ga)->Checkpoints[idx];
 }
+
+
+export_fn double UtilCollisionTime(Vec v1, Vec v2, Vec p1, Vec p2, double r1, double r2) {
+    return CollisionTime(v1, v2, p1, p2, r1, r2);
+}
