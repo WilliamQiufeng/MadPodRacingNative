@@ -19,7 +19,7 @@ export_fn bool Entry() {
 export_fn int TestMethod() {
     std::cout << "Hello, World!" << std::endl;
     ANNUsed ann;
-    ann.InitializeSpace({12, 8, 8, 4});
+    ann.InitializeSpace(ANNUsed::DefaultNodes);
     ann.Randomize();
     ann.Compute();
     for (int i = 0; i < ann.NeuronCount; i++) {
@@ -55,12 +55,18 @@ export_fn double GSRecalculateFitness(intptr_t sim) {
 export_fn double GSFitness(intptr_t sim) {
     return ((GameSimulator *) sim)->Fitness();
 }
+export_fn void GSSetupRandomANN(intptr_t sim) {
+    auto& gs = *(GameSimulator*)sim;
+    gs.SetANN(std::make_shared<ANNUsed>());
+    gs.ANNController->InitializeSpace(ANNUsed::DefaultNodes);
+    gs.ANNController->Randomize();
+}
 
 export_fn intptr_t GACreate() {
     return (std::intptr_t) new GAUsed;
 }
 
-export_fn void GAInitialize(intptr_t ga, int *nodes, int len) {
+export_fn void GAInitialize(intptr_t ga, const int *nodes, int len) {
     std::array<int, ANNUsed::LayersCount> nodesArr{};
     for (int i = 0; i < len; i++) {
         nodesArr[i] = nodes[i];

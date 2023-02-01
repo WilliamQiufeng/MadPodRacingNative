@@ -9,15 +9,19 @@
 #include "Utils.h"
 #include "ANN.h"
 
+void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val);
+
 struct PodEncodeInfo {
-    float x, y, vx, vy, m;
+    float r, angle, vr, vAngle;
 
     void Write(ANNUsed& ann, int& currentNeuron);
 };
-
-struct PodDecodeInfo {
-    float Angle, Thrust;
+struct SelfPodEncodeInfo {
+    float vr, vAngle;
+    void Write(ANNUsed& ann, int& currentNeuron);
 };
+
+void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Vec& podPos);
 
 struct Pod {
     Vec Position, LastPosition;
@@ -40,7 +44,8 @@ struct Pod {
     constexpr const static int Radius = 400, RadiusSq = Radius * Radius;
     constexpr const static int Diameter = Radius * 2, DiameterSq = Diameter * Diameter;
 
-    PodEncodeInfo Encode();
+    PodEncodeInfo Encode(Pod& relativeTo);
+    SelfPodEncodeInfo EncodeSelf();
 
     void UpdateVelocity();
 
@@ -59,6 +64,7 @@ public:
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
+    static float FieldDiagonalLength;
 
     GameSimulator(int podsPerSide, int totalLaps);
 

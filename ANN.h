@@ -22,6 +22,7 @@ public:
     carr Biases;
     int WeightCount = 0, NeuronCount = 0, BiasCount = 0;
     std::array<int, Layers> Nodes;
+    constexpr static const std::array<int, Layers> DefaultNodes = {16, 8, 8, 4};
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
