@@ -32,9 +32,9 @@ export_fn int TestMethod() {
 export_fn intptr_t GSCreate(int podsPerSide, int totalLaps) {
     return (std::intptr_t) new GameSimulator(podsPerSide, totalLaps);
 }
-export_fn void GSSetup(intptr_t sim, Vec *start, int len) {
+export_fn void GSSetup(intptr_t sim, intptr_t ga) {
     auto gameSim = (GameSimulator *) sim;
-    gameSim->Setup(std::vector(start, start + len));
+    gameSim->Setup((GAUsed*)ga);
 }
 export_fn bool GSTick(intptr_t sim) {
     return ((GameSimulator *) sim)->Tick();
@@ -43,11 +43,11 @@ export_fn Pod *GSGetPod(intptr_t sim, int idx) {
     return &((GameSimulator *) sim)->Pods[idx];
 }
 export_fn Vec *GSGetCP(intptr_t sim, int idx) {
-    return &((GameSimulator *) sim)->Checkpoints[idx];
+    return &((GameSimulator *) sim)->GA->Checkpoints[idx];
 }
-export_fn void GSReset(intptr_t sim, Vec *start, int len) {
+export_fn void GSReset(intptr_t sim, intptr_t ga) {
     auto gameSim = (GameSimulator *) sim;
-    gameSim->Reset(std::vector(start, start + len));
+    gameSim->Reset((GAUsed*)ga);
 }
 export_fn double GSRecalculateFitness(intptr_t sim) {
     return ((GameSimulator *) sim)->RecalculateFitness();
@@ -63,9 +63,11 @@ export_fn void GSSetupRandomANN(intptr_t sim) {
 }
 
 export_fn intptr_t GACreate() {
-    return (std::intptr_t) new GAUsed;
+    return (std::intptr_t) new GAUsed();
 }
-
+export_fn void GAInitializeDefault(intptr_t ga) {
+    ((GAUsed *) ga)->Initialize();
+}
 export_fn void GAInitialize(intptr_t ga, const int *nodes, int len) {
     std::array<int, ANNUsed::LayersCount> nodesArr{};
     for (int i = 0; i < len; i++) {
@@ -88,8 +90,15 @@ export_fn void GAGenerationEnd(intptr_t ga) {
 export_fn Vec *GAGetCheckpoint(intptr_t ga, int idx) {
     return &((GAUsed *) ga)->Checkpoints[idx];
 }
-export_fn intptr_t GAGetSimulators(intptr_t ga, int idx) {
-    return (intptr_t) &((GAUsed *) ga)->Checkpoints[idx];
+export_fn intptr_t GAGetSimulator(intptr_t ga, int idx) {
+    return (intptr_t) &((GAUsed *) ga)->Simulators[idx];
+}
+
+export_fn bool GASave(intptr_t ga, const char* path) {
+    return ((GAUsed*)ga)->Save(std::string(path));
+}
+export_fn bool GALoad(intptr_t ga, const char* path) {
+    return ((GAUsed*)ga)->Load(std::string(path));
 }
 
 

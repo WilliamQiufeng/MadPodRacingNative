@@ -6,8 +6,11 @@
 #define MADPODRACING_GAMESIMULATOR_H
 
 #include <vector>
+#include <fstream>
+#include <chrono>
 #include "Utils.h"
 #include "ANN.h"
+using namespace std::chrono;
 
 void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val);
 
@@ -53,11 +56,14 @@ struct Pod {
 
     bool IsEnabled() const;
 };
+template<int Population = 1000>
+class GA;
+typedef GA<> GAUsed;
 
 class GameSimulator {
 public:
     std::shared_ptr<Pod[]> Pods;
-    std::vector<Vec> Checkpoints;
+    GAUsed* GA;
     std::shared_ptr<ANNUsed> ANNController;
     int PodsPerSide, TotalLaps, CurrentTick = 1;
     double CalculatedFitness = -1;
@@ -72,7 +78,7 @@ public:
 
     void SetANN(std::shared_ptr<ANNUsed> ann);
 
-    void Setup(std::vector<Vec> checkpoints);
+    void Setup(GAUsed* ga);
 
     void MoveAndCollide();
 
@@ -80,7 +86,7 @@ public:
 
     bool Tick();
 
-    void Reset(std::vector<Vec> cp);
+    void Reset(GAUsed* ga);
 
     double Fitness();
 
@@ -89,35 +95,42 @@ public:
     static bool Compare(GameSimulator& a, GameSimulator& b);
 };
 
-template<int Population = 50>
+template<int Population>
 class GA {
 public:
     std::array<GameSimulator, Population> Simulators;
     std::array<double, Population> SelectionWeights;
-    std::vector<Vec> Checkpoints;
+    std::shared_ptr<Vec[]> Checkpoints;
+    std::shared_ptr<Vec[]> CPDiffWithBefore;
+    std::shared_ptr<double[]> CPDistWithBefore;
+    int CheckpointSize;
     std::array<int, ANNUsed::LayersCount> Nodes;
+    int GenerationCount = 0;
+    constexpr static const int PodsPerSide = 2;
+    constexpr static const int Laps = 5;
     constexpr static const int PopulationCount = Population;
-    constexpr static const int ChildrenCount = Population / 2;
+    constexpr static const int ChildrenCount = Population / 3 * 2;
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
-    std::uniform_real_distribution<int> DistributionX;
-    std::uniform_real_distribution<int> DistributionY;
-    std::uniform_real_distribution<int> DistributionCPCount;
+    std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x};
+    std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y};
+    std::uniform_int_distribution<int> DistributionCPCount{3, 5};
     std::discrete_distribution<int> DistributionSelection;
 public:
-    GA() : RNG(RandomDevice()), DistributionX(0, GameSimulator::FieldSize.x),
-           DistributionY(0, GameSimulator::FieldSize.y),
-           DistributionCPCount(3, 5) {
+    GA() : RNG(RandomDevice()){
 
     }
 
     void RandomizeCheckpoints() {
-        Checkpoints.clear();
-        Checkpoints.resize(DistributionCPCount(RNG));
-        for (int i = 0; i < Checkpoints.size(); i++) {
+        CheckpointSize = DistributionCPCount(RNG);
+        Checkpoints.reset(new Vec[CheckpointSize]);
+        CPDiffWithBefore.reset(new Vec[CheckpointSize]);
+        CPDistWithBefore.reset(new double[CheckpointSize]);
+        for (int i = 0; i < CheckpointSize; i++) {
+            int tries = 0;
             while (true) {
                 int x = DistributionX(RNG);
                 int y = DistributionY(RNG);
@@ -129,21 +142,27 @@ public:
                         break;
                     }
                 }
-                if (!rethrow) break;
+                if (!rethrow || ++tries > 10) break;
             }
+        }
+        for (int i = 0; i < CheckpointSize; i++) {
+            auto nextIdx = (i + 1) % CheckpointSize;
+            CPDiffWithBefore[nextIdx] = Checkpoints[nextIdx] - Checkpoints[i];
+            CPDistWithBefore[nextIdx] = CPDiffWithBefore[nextIdx].Abs();
         }
     }
 
-    void Initialize(std::array<int, ANNUsed::LayersCount> nodes) {
+    void Initialize(std::array<int, ANNUsed::LayersCount> nodes = ANNUsed::DefaultNodes) {
         Nodes = nodes;
         RandomizeCheckpoints();
         for (int i = 0; i < Population; i++) {
 //            Residents[i].InitializeSpace(nodes);
 //            Residents[i].Randomize();
+            Simulators[i] = GameSimulator(PodsPerSide, Laps);
             Simulators[i].SetANN(std::make_shared<ANNUsed>());
             Simulators[i].ANNController->InitializeSpace(Nodes);
             Simulators[i].ANNController->Randomize();
-            Simulators[i].Setup(Checkpoints);
+            Simulators[i].Setup(this);
         }
     }
 
@@ -157,8 +176,9 @@ public:
     void GenerationStart() {
         RandomizeCheckpoints();
         for (int i = 0; i < Population; i++) {
-            Simulators[i].Reset(Checkpoints);
+            Simulators[i].Reset(this);
         }
+        GenerationCount++;
     }
     void GenerationEnd() {
         SortByFitness();
@@ -166,17 +186,27 @@ public:
     }
 
     bool Generation() {
+        auto start = high_resolution_clock::now();
         GenerationStart();
         while (Tick()) {
 
         }
         GenerationEnd();
+        auto end = high_resolution_clock::now();
+        auto durationNs = duration_cast<microseconds>(end - start);
+        std::cout << durationNs.count() << std::endl;
+        std::cout << "Generation " << GenerationCount << ": \n";
+        for (int i = 0; i < 3; i++) {
+            std::cout << i << ": " << Simulators[i].Fitness() << std::endl;
+        }
         return true;
     }
 
     void ProduceOffsprings() {
         std::array<GameSimulator, ChildrenCount> offsprings;
         for (GameSimulator& gs: offsprings) {
+            gs = GameSimulator(PodsPerSide, Laps);
+            gs.GA = this;
             gs.SetANN(std::make_shared<ANNUsed>());
             gs.ANNController->InitializeSpace(Nodes);
             int father = DistributionSelection(RNG);
@@ -190,14 +220,39 @@ public:
     }
 
     void SortByFitness() {
+        for (auto& sim : Simulators) {
+            sim.RecalculateFitness();
+        }
         std::sort(Simulators.rbegin(), Simulators.rend(), GameSimulator::Compare);
         for (int i = 0; i < Population; i++) {
             SelectionWeights[i] = Simulators[i].Fitness();
         }
         DistributionSelection = std::discrete_distribution(SelectionWeights.begin(), SelectionWeights.end());
     }
+
+    void Write(std::ostream& os) {
+        for (auto& sim : Simulators) {
+            sim.ANNController->Write(os);
+        }
+    }
+    void Read(std::istream& is) {
+        for (auto& sim : Simulators) {
+            sim.ANNController->Read(is);
+        }
+    }
+    bool Save(std::string path) {
+        std::ofstream os(path, std::ios::binary);
+        Write(os);
+        os.close();
+        return os.good();
+    }
+    bool Load(std::string path) {
+        std::ifstream is(path, std::ios::binary);
+        Read(is);
+        is.close();
+        return is.good();
+    }
 };
 
-typedef GA<> GAUsed;
 
 #endif //MADPODRACING_GAMESIMULATOR_H

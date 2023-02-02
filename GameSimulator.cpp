@@ -10,11 +10,11 @@ GameSimulator::GameSimulator(int podsPerSide, int totalLaps = 3) : PodsPerSide(p
 
 }
 
-void GameSimulator::Setup(std::vector<Vec> checkpoints) {
-    Checkpoints = std::move(checkpoints);
+void GameSimulator::Setup(GAUsed* ga) {
+    GA = ga;
     Pods.reset(new Pod[PodsPerSide * 2]);
     for (int i = 0; i < PodsPerSide * 2; i++) {
-        Vec pos = Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
+        Vec pos = GA->Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
         Pods[i] = Pod{
                 pos,
                 pos,
@@ -43,7 +43,7 @@ void GameSimulator::UpdatePodAI(int podIndex) {
         Pod& pod = Pods[j];
         pod.Encode(currentPod).Write(*ANNController, currentNeuron);
     }
-    WriteCheckpoint(*ANNController, currentNeuron, Checkpoints[currentPod.NextCheckpointIndex], currentPod.Position);
+    WriteCheckpoint(*ANNController, currentNeuron, GA->Checkpoints[currentPod.NextCheckpointIndex], currentPod.Position);
     ANNController->Compute();
     float angle = ANNController->Neurons[ANNController->NeuronCount - 2];
     float thrust = ANNController->Neurons[ANNController->NeuronCount - 1];
@@ -144,9 +144,9 @@ bool GameSimulator::Tick() {
         // 100+ turns not reaching a checkpoint: dead
         if (!pod.IsEnabled()) continue;
         // Check checkpoint collision
-        if ((pod.Position - Checkpoints[pod.NextCheckpointIndex]).SqDist() <= CPRadiusSq) {
+        if ((pod.Position - GA->Checkpoints[pod.NextCheckpointIndex]).SqDist() <= CPRadiusSq) {
             pod.NextCheckpointIndex++;
-            if (pod.NextCheckpointIndex >= Checkpoints.size()) {
+            if (pod.NextCheckpointIndex >= GA->CheckpointSize) {
                 pod.NextCheckpointIndex = 0;
                 pod.Lap++;
             }
@@ -194,10 +194,15 @@ double GameSimulator::Fitness() {
     CalculatedFitness = 0;
     for (int i = 0; i < PodsPerSide * 2; i++) {
         auto& pod = Pods[i];
-        CalculatedFitness += (pod.Lap * Checkpoints.size() + pod.NextCheckpointIndex) / (double) CurrentTick;
+        CalculatedFitness += (pod.Lap * GA->CheckpointSize + pod.NextCheckpointIndex) / (double) CurrentTick * 100;
+        if (!pod.Finished) {
+
+            auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
+            CalculatedFitness += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 3);
+        }
         if (pod.IsOut) continue;
-        if (pod.Finished) CalculatedFitness += 0.02; // ?
-        if (pod.Boosted) CalculatedFitness += 0.01;
+        if (pod.Finished) CalculatedFitness += 10; // ?
+        if (pod.Boosted) CalculatedFitness += 1;
     }
     return CalculatedFitness;
 }
@@ -206,8 +211,8 @@ bool GameSimulator::Compare(GameSimulator& a, GameSimulator& b) {
     return a.Fitness() < b.Fitness();
 }
 
-void GameSimulator::Reset(std::vector<Vec> cp) {
-    Setup(cp);
+void GameSimulator::Reset(GAUsed* ga) {
+    Setup(ga);
     CurrentTick = 1;
     CalculatedFitness = -1;
 }

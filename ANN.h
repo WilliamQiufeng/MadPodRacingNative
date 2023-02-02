@@ -9,6 +9,7 @@
 #include <memory>
 #include <random>
 #include <cmath>
+#include <fstream>
 
 template<int Layers>
 class ANN {
@@ -120,6 +121,14 @@ public:
                 to[i] = a[i];
             }
         }
+    }
+    void Write(std::ostream& os) {
+        os.write((const char*)Weights.get(), sizeof(float) * WeightCount);
+        os.write((const char*)Biases.get(), sizeof(float) * BiasCount);
+    }
+    void Read(std::istream& is) {
+        is.read((char*)Weights.get(), sizeof(float) * WeightCount);
+        is.read((char*)Biases.get(), sizeof(float) * BiasCount);
     }
 };
 
