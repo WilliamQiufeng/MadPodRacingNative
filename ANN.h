@@ -23,12 +23,13 @@ public:
     carr Biases;
     int WeightCount = 0, NeuronCount = 0, BiasCount = 0;
     std::array<int, Layers> Nodes;
-    constexpr static const std::array<int, Layers> DefaultNodes = {16, 8, 8, 4};
+    constexpr static const std::array<int, Layers> DefaultNodes = {16, 32, 24, 12, 16, 2};
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
     std::uniform_real_distribution<float> Distribution;
     std::uniform_real_distribution<float> Distribution01;
+    std::uniform_int_distribution<int> WeightDistribution, BiasDistribution;
 public:
     ANN() : RNG(RandomDevice()), Distribution(-1.0, 1.0), Distribution01(0.0, 1.0) {}
 
@@ -38,6 +39,8 @@ public:
         RNG = ann.RNG;
         Distribution = ann.Distribution;
         Distribution01 = ann.Distribution01;
+        WeightDistribution = ann.WeightDistribution;
+        BiasDistribution = ann.BiasDistribution;
         std::memcpy(Weights, ann.Weights, WeightCount);
         std::memcpy(Neurons, ann.Neurons, NeuronCount);
         std::memcpy(Biases, ann.Biases, BiasCount);
@@ -62,6 +65,8 @@ public:
         Weights.reset(new float[WeightCount]);
         Neurons.reset(new float[NeuronCount]);
         Biases.reset(new float[BiasCount]);
+        WeightDistribution = std::uniform_int_distribution(0, WeightCount - 1);
+        BiasDistribution = std::uniform_int_distribution(0, BiasCount - 1);
     }
 
     void Compute() {
@@ -94,11 +99,13 @@ public:
     }
 
     void Crossover(const ANN<Layers>& another, const ANN<Layers>& to, float probability) {
-        Crossover(Weights, another.Weights, to.Weights, WeightCount, probability);
-        Crossover(Biases, another.Biases, to.Biases, BiasCount, probability);
+        Crossover(Weights, another.Weights, to.Weights, WeightDistribution, probability);
+        Crossover(Biases, another.Biases, to.Biases, BiasDistribution, probability);
+//        Crossover2(Weights, another.Weights, to.Weights, WeightCount, probability);
+//        Crossover2(Biases, another.Biases, to.Biases,BiasCount, probability);
     }
 
-    void Crossover(const carr& a1, const carr& a2, const carr& to, int len, float probability) {
+    void Crossover2(const carr& a1, const carr& a2, const carr& to, int len, float probability) {
         for (int i = 0; i < len; i++) {
             if (Distribution01(RNG) <= probability) {
                 to[i] = a2[i];
@@ -106,6 +113,13 @@ public:
                 to[i] = a1[i];
             }
         }
+    }
+
+    void Crossover(const carr& a1, const carr& a2, const carr& to, std::uniform_int_distribution<int>& intDistrib,
+                   float probability) {
+        auto idx = intDistrib(RNG);
+        std::memcpy(to.get(), a1.get(), idx);
+        std::memcpy(to.get() + idx, a2.get() + idx, intDistrib.b() + 1 - idx);
     }
 
     void Mutate(const ANN<Layers>& to, float probability) {
@@ -132,6 +146,6 @@ public:
     }
 };
 
-typedef ANN<4> ANNUsed;
+typedef ANN<6> ANNUsed;
 
 #endif //MADPODRACING_ANN_H

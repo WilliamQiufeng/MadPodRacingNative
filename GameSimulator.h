@@ -17,14 +17,13 @@ void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val);
 struct PodEncodeInfo {
     float r, angle, vr, vAngle;
 
-    void Write(ANNUsed& ann, int& currentNeuron);
+    void Write(ANNUsed& ann, int& currentNeuron) const;
 };
 struct SelfPodEncodeInfo {
     float vr, vAngle;
     void Write(ANNUsed& ann, int& currentNeuron);
 };
 
-void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Vec& podPos);
 
 struct Pod {
     Vec Position, LastPosition;
@@ -43,29 +42,35 @@ struct Pod {
     bool IsOut = false;
     bool Finished = false;
     bool IsCollided = false;
+    int CPPassed = 0;
     constexpr const static float NormalMass = 1, ShieldMass = 10;
     constexpr const static int Radius = 400, RadiusSq = Radius * Radius;
     constexpr const static int Diameter = Radius * 2, DiameterSq = Diameter * Diameter;
 
-    PodEncodeInfo Encode(Pod& relativeTo);
-    SelfPodEncodeInfo EncodeSelf();
+    PodEncodeInfo Encode(Pod& relativeTo) const;
+
+    SelfPodEncodeInfo EncodeSelf() const;
 
     void UpdateVelocity();
 
-    double CheckCollision(const Pod& other) const;
+    [[nodiscard]] double CheckCollision(const Pod& other) const;
 
-    bool IsEnabled() const;
+    [[nodiscard]] bool IsEnabled() const;
 };
-template<int Population = 1000>
+
+void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
+
+template<int Population = 500>
 class GA;
+
 typedef GA<> GAUsed;
 
 class GameSimulator {
 public:
     std::shared_ptr<Pod[]> Pods;
-    GAUsed* GA;
+    GAUsed *GA = nullptr;
     std::shared_ptr<ANNUsed> ANNController;
-    int PodsPerSide, TotalLaps, CurrentTick = 1;
+    int PodsPerSide = 2, TotalLaps = 3, CurrentTick = 1;
     double CalculatedFitness = -1;
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
@@ -80,9 +85,9 @@ public:
 
     void Setup(GAUsed* ga);
 
-    void MoveAndCollide();
+    void MoveAndCollide() const;
 
-    void UpdatePodAI(int podIndex);
+    void UpdatePodAI(int podIndex) const;
 
     bool Tick();
 
@@ -197,7 +202,11 @@ public:
         std::cout << durationNs.count() << std::endl;
         std::cout << "Generation " << GenerationCount << ": \n";
         for (int i = 0; i < 3; i++) {
-            std::cout << i << ": " << Simulators[i].Fitness() << std::endl;
+            std::cout << i << ": " << Simulators[i].Fitness();
+            for (int j = 0; j < PodsPerSide * 2; j++) {
+                std::cout << " " << Simulators[i].Pods[j].CPPassed;
+            }
+            std::cout << " done in " << Simulators[i].CurrentTick << " ticks" << std::endl;
         }
         return true;
     }
@@ -231,22 +240,25 @@ public:
     }
 
     void Write(std::ostream& os) {
-        for (auto& sim : Simulators) {
+        for (auto& sim: Simulators) {
             sim.ANNController->Write(os);
         }
     }
+
     void Read(std::istream& is) {
-        for (auto& sim : Simulators) {
+        for (auto& sim: Simulators) {
             sim.ANNController->Read(is);
         }
     }
-    bool Save(std::string path) {
+
+    bool Save(const std::string& path) {
         std::ofstream os(path, std::ios::binary);
         Write(os);
         os.close();
         return os.good();
     }
-    bool Load(std::string path) {
+
+    bool Load(const std::string& path) {
         std::ifstream is(path, std::ios::binary);
         Read(is);
         is.close();

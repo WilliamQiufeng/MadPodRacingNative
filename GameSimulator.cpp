@@ -32,7 +32,7 @@ void GameSimulator::Setup(GAUsed* ga) {
     }
 }
 
-void GameSimulator::UpdatePodAI(int podIndex) {
+void GameSimulator::UpdatePodAI(int podIndex) const {
     int currentNeuron = 0;
     Pod& currentPod = Pods[podIndex];
     currentPod.EncodeSelf().Write(*ANNController, currentNeuron);
@@ -43,7 +43,7 @@ void GameSimulator::UpdatePodAI(int podIndex) {
         Pod& pod = Pods[j];
         pod.Encode(currentPod).Write(*ANNController, currentNeuron);
     }
-    WriteCheckpoint(*ANNController, currentNeuron, GA->Checkpoints[currentPod.NextCheckpointIndex], currentPod.Position);
+    WriteCheckpoint(*ANNController, currentNeuron, GA->Checkpoints[currentPod.NextCheckpointIndex], currentPod);
     ANNController->Compute();
     float angle = ANNController->Neurons[ANNController->NeuronCount - 2];
     float thrust = ANNController->Neurons[ANNController->NeuronCount - 1];
@@ -60,13 +60,13 @@ void GameSimulator::UpdatePodAI(int podIndex) {
         }
     }
     currentPod.Thrust = thrust;
-    currentPod.TargetPosition = currentPod.Position + UnitRight.Rotate(angle) * 1000;
+    currentPod.TargetPosition = currentPod.Position + UnitRight.Rotate(currentPod.Facing + angle) * 1000;
 }
 
 void Pod::UpdateVelocity() {
     // Update position
     auto idealDirection = TargetPosition - Position;
-    auto rotateDegree = Bound<double>(ClampRadian(idealDirection.Angle() - Facing), DegToRad(-18), DegToRad(18));
+    auto rotateRad = Bound<double>(ClampRadian(idealDirection.Angle() - Facing), DegToRad(-18), DegToRad(18));
     auto thrust = Thrust;
     if (Boost) {
         thrust = Boosted ? 100 : 650;
@@ -77,7 +77,7 @@ void Pod::UpdateVelocity() {
         ShieldCD--;
     }
     Mass = ShieldCD ? Pod::ShieldMass : Pod::NormalMass;
-    Facing += rotateDegree;
+    Facing += rotateRad;
     Velocity += UnitRight.Rotate(Facing) * thrust;
 }
 
@@ -86,7 +86,7 @@ double Pod::CheckCollision(const Pod& other) const {
     return CollisionTime(Velocity, other.Velocity, Position, other.Position, Radius, Radius);
 }
 
-void GameSimulator::MoveAndCollide() {
+void GameSimulator::MoveAndCollide() const {
     const double maxTime = 1e9;
     double minNextCldTime = maxTime;
     int mctI, mctJ; // if min exists, the two collided object index
@@ -146,6 +146,7 @@ bool GameSimulator::Tick() {
         // Check checkpoint collision
         if ((pod.Position - GA->Checkpoints[pod.NextCheckpointIndex]).SqDist() <= CPRadiusSq) {
             pod.NextCheckpointIndex++;
+            pod.CPPassed++;
             if (pod.NextCheckpointIndex >= GA->CheckpointSize) {
                 pod.NextCheckpointIndex = 0;
                 pod.Lap++;
@@ -194,15 +195,14 @@ double GameSimulator::Fitness() {
     CalculatedFitness = 0;
     for (int i = 0; i < PodsPerSide * 2; i++) {
         auto& pod = Pods[i];
-        CalculatedFitness += (pod.Lap * GA->CheckpointSize + pod.NextCheckpointIndex) / (double) CurrentTick * 100;
-        if (!pod.Finished) {
-
-            auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
-            CalculatedFitness += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 3);
-        }
+        CalculatedFitness += pod.CPPassed / (double) CurrentTick * 5000;
+//        if (!pod.Finished) {
+//            auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
+//            CalculatedFitness += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 100);
+//        }
         if (pod.IsOut) continue;
-        if (pod.Finished) CalculatedFitness += 10; // ?
-        if (pod.Boosted) CalculatedFitness += 1;
+        if (pod.Finished) CalculatedFitness += 200; // ?
+        if (pod.Boosted) CalculatedFitness += 10;
     }
     return CalculatedFitness;
 }
@@ -224,20 +224,21 @@ double GameSimulator::RecalculateFitness() {
 
 GameSimulator::GameSimulator() = default;
 
-void PodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) {
+void PodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) const {
     WriteNeuron(ann, currentNeuron, r);
     WriteNeuron(ann, currentNeuron, angle);
     WriteNeuron(ann, currentNeuron, vr);
     WriteNeuron(ann, currentNeuron, vAngle);
 }
 
-PodEncodeInfo Pod::Encode(Pod& relativeTo) {
+PodEncodeInfo Pod::Encode(Pod& relativeTo) const {
     auto posDiff = Position - relativeTo.Position;
     PodEncodeInfo res{};
     res.r = posDiff.Abs() / GameSimulator::FieldDiagonalLength;
-    res.angle = posDiff.Angle() / M_PI;
-    res.vr = relativeTo.Velocity.Abs() / 1000;
-    res.vAngle = relativeTo.Velocity.Angle() / M_PI;
+    res.angle = (posDiff.Angle() - relativeTo.Facing) / M_PI;
+    auto relVel = Velocity - relativeTo.Velocity;
+    res.vr = relVel.Abs() / 1000;
+    res.vAngle = (relVel.Angle() - relativeTo.Facing) / M_PI;
     return res;
 }
 
@@ -245,7 +246,7 @@ bool Pod::IsEnabled() const {
     return !IsOut && !Finished;
 }
 
-SelfPodEncodeInfo Pod::EncodeSelf() {
+SelfPodEncodeInfo Pod::EncodeSelf() const {
     SelfPodEncodeInfo res{};
     res.vr = Velocity.Abs() / 1000;
     res.vAngle = Velocity.Angle() / M_PI;
@@ -256,11 +257,11 @@ void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val) {
     ann.Neurons[currentNeuron++] = val;
 }
 
-void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Vec& podPos) {
-    auto posDiff = cpPos - podPos;
+void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod) {
+    auto posDiff = cpPos - pod.Position;
     auto normalized = Vec{posDiff.x / GameSimulator::FieldSize.x, posDiff.y / GameSimulator::FieldSize.y};
-    WriteNeuron(ann, currentNeuron, normalized.x);
-    WriteNeuron(ann, currentNeuron, normalized.y);
+    WriteNeuron(ann, currentNeuron, normalized.Abs());
+    WriteNeuron(ann, currentNeuron, posDiff.Angle() - pod.Facing);
 }
 
 void SelfPodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) {
