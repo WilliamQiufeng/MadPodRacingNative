@@ -91,7 +91,7 @@ struct Vec {
 
     [[nodiscard]] Vec Floor() const;
 
-    void OutputReal(std::ostream& os);
+    void OutputReal(std::ostream& os) const;
 
     friend std::ostream& operator<<(std::ostream& os, const Vec& p);
 

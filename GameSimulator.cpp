@@ -221,8 +221,8 @@ bool GameSimulator::Tick() {
 }
 
 void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2) {
-    ANN1 = ann1;
-    ANN2 = ann2;
+    ANN1 = std::move(ann1);
+    ANN2 = std::move(ann2);
 }
 
 double GameSimulator::Fitness(double& out, int offset) const {

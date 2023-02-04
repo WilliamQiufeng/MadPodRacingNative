@@ -25,7 +25,7 @@ Vec Vec::Rotate(double rad) const {
     return {x * c - y * s, x * s + y * c};
 }
 
-void Vec::OutputReal(std::ostream& os) { os << "(" << x << ", " << y << ")"; }
+void Vec::OutputReal(std::ostream& os) const { os << "(" << x << ", " << y << ")"; }
 
 std::ostream& operator<<(std::ostream& os, const Vec& p) {
     os << (int) p.x << ' ' << (int) p.y;
