@@ -52,17 +52,22 @@ export_fn void GSReset(intptr_t sim, intptr_t ga) {
     auto gameSim = (GameSimulator *) sim;
     gameSim->Reset((GAUsed *) ga);
 }
-export_fn double GSRecalculateFitness(intptr_t sim) {
-    return ((GameSimulator *) sim)->RecalculateFitness();
+export_fn void GSCalculateFitness(intptr_t sim) {
+    ((GameSimulator *) sim)->CalculateFitness();
 }
-export_fn double GSFitness(intptr_t sim) {
-    return ((GameSimulator *) sim)->Fitness();
+export_fn double GSFitness1(intptr_t sim) {
+    return ((GameSimulator *) sim)->Fitness1;
+}
+export_fn double GSFitness2(intptr_t sim) {
+    return ((GameSimulator *) sim)->Fitness2;
 }
 export_fn void GSSetupRandomANN(intptr_t sim) {
     auto& gs = *(GameSimulator *) sim;
-    gs.SetANN(std::make_shared<ANNUsed>());
-    gs.ANNController->InitializeSpace(ANNUsed::DefaultNodes);
-    gs.ANNController->Randomize();
+    gs.SetANN(std::make_shared<ANNUsed>(), std::make_shared<ANNUsed>());
+    gs.ANN1->InitializeSpace(ANNUsed::DefaultNodes);
+    gs.ANN1->Randomize();
+    gs.ANN2->InitializeSpace(ANNUsed::DefaultNodes);
+    gs.ANN2->Randomize();
 }
 export_fn int GSCPCount(std::intptr_t sim) {
     return ((GameSimulator *) sim)->GA->CheckpointSize;
@@ -98,9 +103,6 @@ export_fn Vec *GAGetCheckpoint(intptr_t ga, int idx) {
 }
 export_fn int GACPCount(std::intptr_t ga) {
     return ((GAUsed *) ga)->CheckpointSize;
-}
-export_fn intptr_t GAGetSimulator(intptr_t ga, int idx) {
-    return (intptr_t) &((GAUsed *) ga)->Simulators[idx];
 }
 
 export_fn bool GASave(intptr_t ga, const char *path) {

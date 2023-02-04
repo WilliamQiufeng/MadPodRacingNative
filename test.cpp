@@ -15,7 +15,7 @@ int main() {
         ga.Generation();
         auto end = high_resolution_clock::now();
         auto dur = duration_cast<minutes>(end - start);
-        if (dur.count() > 15) break;
+        if (dur.count() > 50) break;
     }
     ga.Save("out.bin");
     return 0;

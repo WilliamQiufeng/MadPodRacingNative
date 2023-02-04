@@ -10,6 +10,7 @@
 #include <chrono>
 #include "Utils.h"
 #include "ANN.h"
+
 using namespace std::chrono;
 
 void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val);
@@ -19,8 +20,12 @@ struct PodEncodeInfo {
 
     void Write(ANNUsed& ann, int& currentNeuron) const;
 };
+
+constexpr static const PodEncodeInfo FarawayPodEncodeInfo{1, 0, 0, 0};
+
 struct SelfPodEncodeInfo {
     float vr, vAngle;
+
     void Write(ANNUsed& ann, int& currentNeuron);
 };
 
@@ -49,7 +54,7 @@ struct Pod {
 
     PodEncodeInfo Encode(Pod& relativeTo) const;
 
-    SelfPodEncodeInfo EncodeSelf() const;
+    [[nodiscard]] SelfPodEncodeInfo EncodeSelf() const;
 
     void UpdateVelocity();
 
@@ -60,7 +65,7 @@ struct Pod {
 
 void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
 
-template<int Population = 500>
+template<int Population = 128>
 class GA;
 
 typedef GA<> GAUsed;
@@ -69,21 +74,22 @@ class GameSimulator {
 public:
     std::shared_ptr<Pod[]> Pods;
     GAUsed *GA = nullptr;
-    std::shared_ptr<ANNUsed> ANNController;
+    std::shared_ptr<ANNUsed> ANN1, ANN2;
     int PodsPerSide = 2, TotalLaps = 3, CurrentTick = 1;
-    double CalculatedFitness = -1;
+    double Fitness1, Fitness2;
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
     static float FieldDiagonalLength;
+    bool ANN1Won, Finished;
 
     GameSimulator(int podsPerSide, int totalLaps);
 
     GameSimulator();
 
-    void SetANN(std::shared_ptr<ANNUsed> ann);
+    void SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2);
 
-    void Setup(GAUsed* ga);
+    void Setup(GAUsed *ga);
 
     void MoveAndCollide() const;
 
@@ -91,19 +97,22 @@ public:
 
     bool Tick();
 
-    void Reset(GAUsed* ga);
+    bool Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2);
 
-    double Fitness();
+    void Reset(GAUsed *ga);
 
-    double RecalculateFitness();
+    double Fitness(double& out, int offset);
 
-    static bool Compare(GameSimulator& a, GameSimulator& b);
+    void CalculateFitness();
+
+
 };
 
 template<int Population>
 class GA {
 public:
-    std::array<GameSimulator, Population> Simulators;
+    std::array<std::shared_ptr<ANNUsed>, Population> ANNs;
+    GameSimulator Simulator;
     std::array<double, Population> SelectionWeights;
     std::shared_ptr<Vec[]> Checkpoints;
     std::shared_ptr<Vec[]> CPDiffWithBefore;
@@ -117,6 +126,7 @@ public:
     constexpr static const int ChildrenCount = Population / 3 * 2;
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
+    constexpr static const int SelectionWeightBias = 50;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
@@ -125,8 +135,11 @@ private:
     std::uniform_int_distribution<int> DistributionCPCount{3, 5};
     std::discrete_distribution<int> DistributionSelection;
 public:
-    GA() : RNG(RandomDevice()){
-
+    GA() : RNG(RandomDevice()) {
+        for (int i = 0; i < Population; i++) {
+            SelectionWeights[i] = Population - i + SelectionWeightBias;
+        }
+        DistributionSelection = std::discrete_distribution(SelectionWeights.begin(), SelectionWeights.end());
     }
 
     void RandomizeCheckpoints() {
@@ -160,94 +173,98 @@ public:
     void Initialize(std::array<int, ANNUsed::LayersCount> nodes = ANNUsed::DefaultNodes) {
         Nodes = nodes;
         RandomizeCheckpoints();
-        for (int i = 0; i < Population; i++) {
-//            Residents[i].InitializeSpace(nodes);
-//            Residents[i].Randomize();
-            Simulators[i] = GameSimulator(PodsPerSide, Laps);
-            Simulators[i].SetANN(std::make_shared<ANNUsed>());
-            Simulators[i].ANNController->InitializeSpace(Nodes);
-            Simulators[i].ANNController->Randomize();
-            Simulators[i].Setup(this);
+        for (auto& ann: ANNs) {
+            ann = std::make_shared<ANNUsed>();
+            ann->InitializeSpace(Nodes);
+            ann->Randomize();
         }
+        Simulator = GameSimulator(PodsPerSide, Laps);
+        Simulator.Setup(this);
     }
+
 
     bool Tick() {
         bool cont = false;
-        for (int i = 0; i < Population; i++) {
-            cont |= Simulators[i].Tick();
-        }
+        cont |= Simulator.Tick();
         return cont;
     };
+
     void GenerationStart() {
         RandomizeCheckpoints();
-        for (int i = 0; i < Population; i++) {
-            Simulators[i].Reset(this);
-        }
+        Simulator.Reset(this);
         GenerationCount++;
     }
+
     void GenerationEnd() {
-        SortByFitness();
         ProduceOffsprings();
     }
 
     bool Generation() {
         auto start = high_resolution_clock::now();
         GenerationStart();
-        while (Tick()) {
-
+        for (int i = 0; i < 2; i++) {
+            TournamentSort();
         }
         GenerationEnd();
         auto end = high_resolution_clock::now();
         auto durationNs = duration_cast<microseconds>(end - start);
         std::cout << durationNs.count() << std::endl;
-        std::cout << "Generation " << GenerationCount << ": \n";
+        std::cout << "Generation " << GenerationCount << ", " << CheckpointSize << " checkpoints: \n";
         for (int i = 0; i < 3; i++) {
-            std::cout << i << ": " << Simulators[i].Fitness();
+            int against = DistributionSelection(RNG);
+            Simulator.Run(ANNs[i], ANNs[against]);
+            Simulator.CalculateFitness();
+            std::cout << i << " against " << against << ": " << Simulator.Fitness1 << " to " << Simulator.Fitness2;
             for (int j = 0; j < PodsPerSide * 2; j++) {
-                std::cout << " " << Simulators[i].Pods[j].CPPassed;
+                std::cout << " " << Simulator.Pods[j].CPPassed;
             }
-            std::cout << " done in " << Simulators[i].CurrentTick << " ticks" << std::endl;
+            std::cout << " done in " << Simulator.CurrentTick << " ticks, ";
+            std::cout << (Simulator.ANN1Won ? "Won" : "Lost") << std::endl;
         }
         return true;
     }
 
-    void ProduceOffsprings() {
-        std::array<GameSimulator, ChildrenCount> offsprings;
-        for (GameSimulator& gs: offsprings) {
-            gs = GameSimulator(PodsPerSide, Laps);
-            gs.GA = this;
-            gs.SetANN(std::make_shared<ANNUsed>());
-            gs.ANNController->InitializeSpace(Nodes);
-            int father = DistributionSelection(RNG);
-            int mother = DistributionSelection(RNG);
-            Simulators[father].ANNController->Mate(*Simulators[mother].ANNController, *gs.ANNController,
-                                                   CrossoverProbability, MutateProbability);
+    void TournamentSort() {
+        auto separation = Population / 2;
+        while (separation) {
+            for (int i = 0; i < separation; i++) {
+                // former lost. swap with latter.
+                if (!Simulator.Run(ANNs[i], ANNs[i + separation])) {
+                    std::swap(ANNs[i], ANNs[i + separation]);
+                    std::cout << "L";
+                } else {
+                    std::cout << "W";
+                }
+            }
+            separation /= 2;
         }
-        for (int i = 0; i < ChildrenCount; i++) {
-            Simulators[Population - i - 1] = offsprings[i];
-        }
+        std::cout << std::endl;
     }
 
-    void SortByFitness() {
-        for (auto& sim : Simulators) {
-            sim.RecalculateFitness();
+    void ProduceOffsprings() {
+        std::array<std::shared_ptr<ANNUsed>, ChildrenCount> offsprings;
+        for (auto& newANN: offsprings) {
+            int father = DistributionSelection(RNG);
+            int mother = DistributionSelection(RNG);
+            newANN = std::make_shared<ANNUsed>();
+            newANN->InitializeSpace(Nodes);
+            ANNs[father]->Mate(*ANNs[mother], *newANN,
+                               CrossoverProbability, MutateProbability);
         }
-        std::sort(Simulators.rbegin(), Simulators.rend(), GameSimulator::Compare);
-        for (int i = 0; i < Population; i++) {
-            SelectionWeights[i] = Simulators[i].Fitness();
+        for (int i = 0; i < ChildrenCount; i++) {
+            ANNs[Population - i - 1] = offsprings[i];
         }
-        DistributionSelection = std::discrete_distribution(SelectionWeights.begin(), SelectionWeights.end());
     }
 
     void Write(std::ostream& os) {
-        for (auto& sim: Simulators) {
-            sim.ANNController->Write(os);
+        for (auto& ann: ANNs) {
+            ann->Write(os);
         }
     }
 
     void Read(std::istream& is) {
-        for (auto& sim: Simulators) {
-            sim.ANNController->Read(is);
+        for (auto& ann: ANNs) {
+            ann->Read(is);
         }
     }
 
