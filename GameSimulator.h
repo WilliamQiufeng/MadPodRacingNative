@@ -26,7 +26,7 @@ constexpr static const PodEncodeInfo FarawayPodEncodeInfo{1, 0, 0, 0};
 struct SelfPodEncodeInfo {
     float vr, vAngle;
 
-    void Write(ANNUsed& ann, int& currentNeuron);
+    void Write(ANNUsed& ann, int& currentNeuron) const;
 };
 
 
@@ -65,25 +65,30 @@ struct Pod {
 
 void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
 
-template<int Population = 128>
+template<int Population = 512>
 class GA;
 
 typedef GA<> GAUsed;
+struct Snapshot;
+
 
 class GameSimulator {
 public:
     std::shared_ptr<Pod[]> Pods;
     GAUsed *GA = nullptr;
     std::shared_ptr<ANNUsed> ANN1, ANN2;
-    int PodsPerSide = 2, TotalLaps = 3, CurrentTick = 1;
+    int TotalLaps = 3, CurrentTick = 1;
+    constexpr const static int PodsPerSide = 2;
+    constexpr const static int PodCount = PodsPerSide * 2;
     double Fitness1, Fitness2;
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
     static float FieldDiagonalLength;
     bool ANN1Won, Finished;
+    std::vector<Snapshot> Snapshots;
 
-    GameSimulator(int podsPerSide, int totalLaps);
+    explicit GameSimulator(int totalLaps);
 
     GameSimulator();
 
@@ -97,15 +102,24 @@ public:
 
     bool Tick();
 
-    bool Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2);
+    bool Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record = false);
 
     void Reset(GAUsed *ga);
 
-    double Fitness(double& out, int offset);
+    double Fitness(double& out, int offset) const;
 
     void CalculateFitness();
 
 
+};
+
+struct Snapshot {
+public:
+    std::array<Pod, GameSimulator::PodCount> Pods;
+    int CurrentTick;
+    double Fitness1, Fitness2;
+
+    explicit Snapshot(GameSimulator& simulator);
 };
 
 template<int Population>
@@ -130,9 +144,9 @@ public:
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
-    std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x};
-    std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y};
-    std::uniform_int_distribution<int> DistributionCPCount{3, 5};
+    std::uniform_int_distribution<int> DistributionX{GameSimulator::FieldSize.x};
+    std::uniform_int_distribution<int> DistributionY{GameSimulator::FieldSize.y};
+    std::uniform_int_distribution<int> DistributionCPCount{5};
     std::discrete_distribution<int> DistributionSelection;
 public:
     GA() : RNG(RandomDevice()) {
@@ -178,7 +192,7 @@ public:
             ann->InitializeSpace(Nodes);
             ann->Randomize();
         }
-        Simulator = GameSimulator(PodsPerSide, Laps);
+        Simulator = GameSimulator(Laps);
         Simulator.Setup(this);
     }
 
@@ -248,8 +262,7 @@ public:
             int mother = DistributionSelection(RNG);
             newANN = std::make_shared<ANNUsed>();
             newANN->InitializeSpace(Nodes);
-            ANNs[father]->Mate(*ANNs[mother], *newANN,
-                               CrossoverProbability, MutateProbability);
+            ANNs[father]->Mate(*ANNs[mother], *newANN, MutateProbability);
         }
         for (int i = 0; i < ChildrenCount; i++) {
             ANNs[Population - i - 1] = offsprings[i];

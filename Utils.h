@@ -70,26 +70,26 @@ inline double ClampRadian(double rad) {
 struct Vec {
     double x, y;
 
-    double Abs() const;
+    [[nodiscard]] double Abs() const;
 
-    double Angle() const;
+    [[nodiscard]] double Angle() const;
 
     // double angle(Vec base) { return atan2(Det(base), dot(base)); }
-    double Angle(Vec base) const;
+    [[nodiscard]] double Angle(Vec base) const;
 
-    double Dot(Vec b) const;
+    [[nodiscard]] double Dot(Vec b) const;
 
-    double Det(Vec b) const;
+    [[nodiscard]] double Det(Vec b) const;
 
-    double SqDist() const;
+    [[nodiscard]] double SqDist() const;
 
-    double SqDist(Vec b) const;;
+    [[nodiscard]] double SqDist(Vec b) const;
 
-    Vec Unit() const;
+    [[nodiscard]] Vec Unit() const;
 
-    Vec Rotate(double rad) const;
+    [[nodiscard]] Vec Rotate(double rad) const;
 
-    Vec Floor() const;
+    [[nodiscard]] Vec Floor() const;
 
     void OutputReal(std::ostream& os);
 
@@ -107,9 +107,9 @@ struct Vec {
 
     Vec operator/(double s) const;
 
-    Vec& operator+=(const Vec b);
+    Vec& operator+=(Vec b);
 
-    Vec& operator*=(const double scale);
+    Vec& operator*=(double scale);
 
     bool operator==(Vec b) const;
 

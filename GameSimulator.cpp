@@ -6,14 +6,14 @@
 
 #include <utility>
 
-GameSimulator::GameSimulator(int podsPerSide, int totalLaps = 3) : PodsPerSide(podsPerSide), TotalLaps(totalLaps) {
+GameSimulator::GameSimulator(int totalLaps) : TotalLaps(totalLaps) {
 
 }
 
 void GameSimulator::Setup(GAUsed *ga) {
     GA = ga;
-    Pods.reset(new Pod[PodsPerSide * 2]);
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    Pods.reset(new Pod[PodCount]);
+    for (int i = 0; i < PodCount; i++) {
         Vec pos = GA->Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
         Pods[i] = Pod{
                 pos,
@@ -37,9 +37,9 @@ void GameSimulator::UpdatePodAI(int podIndex) const {
     Pod& currentPod = Pods[podIndex];
     ANNUsed& ann = *(podIndex < PodsPerSide ? ANN1 : ANN2);
     currentPod.EncodeSelf().Write(ann, currentNeuron);
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    for (int i = 0; i < PodCount; i++) {
         // If enemy, start filling enemy data first
-        int j = podIndex < PodsPerSide ? i : (i + PodsPerSide) % (PodsPerSide * 2);
+        int j = podIndex < PodsPerSide ? i : (i + PodsPerSide) % PodCount;
         if (j == podIndex) continue;
         Pod& pod = Pods[j];
         if (pod.IsEnabled())
@@ -48,6 +48,8 @@ void GameSimulator::UpdatePodAI(int podIndex) const {
             FarawayPodEncodeInfo.Write(ann, currentNeuron);
     }
     WriteCheckpoint(ann, currentNeuron, GA->Checkpoints[currentPod.NextCheckpointIndex], currentPod);
+    WriteCheckpoint(ann, currentNeuron, GA->Checkpoints[(currentPod.NextCheckpointIndex + 1) % GA->CheckpointSize],
+                    currentPod);
     ann.Compute();
     float angle = ann.Neurons[ann.NeuronCount - 2];
     float thrust = ann.Neurons[ann.NeuronCount - 1];
@@ -98,10 +100,10 @@ void GameSimulator::MoveAndCollide() const {
     double remainTime = 1;
     // O(N^2?)
     while (remainTime > 0) {
-        for (int i = 0; i < PodsPerSide * 2; i++) {
+        for (int i = 0; i < PodCount; i++) {
             auto& pod = Pods[i];
             if (!pod.IsEnabled()) continue;
-            for (int j = i + 1; j < PodsPerSide * 2; j++) {
+            for (int j = i + 1; j < PodCount; j++) {
                 auto& anotherPod = Pods[j];
                 if (!pod.IsEnabled()) continue;
                 if (i == lastI && j == lastJ) continue;
@@ -115,14 +117,14 @@ void GameSimulator::MoveAndCollide() const {
             }
         }
         if (minNextCldTime > remainTime) { // No more collisions
-            for (int i = 0; i < PodsPerSide * 2; i++) {
+            for (int i = 0; i < PodCount; i++) {
                 auto& pod = Pods[i];
                 if (!pod.IsEnabled()) continue;
                 pod.Position += pod.Velocity * remainTime;
             }
             break;
         }
-        for (int i = 0; i < PodsPerSide * 2; i++) {
+        for (int i = 0; i < PodCount; i++) {
             auto& pod = Pods[i];
             if (!pod.IsEnabled()) continue;
             pod.Position += pod.Velocity * minNextCldTime;
@@ -141,10 +143,10 @@ void GameSimulator::MoveAndCollide() const {
 
 bool GameSimulator::Tick() {
     if (Finished) return false;
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    for (int i = 0; i < PodCount; i++) {
         UpdatePodAI(i);
     }
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    for (int i = 0; i < PodCount; i++) {
         auto& pod = Pods[i];
         int companionPodIdx = (i < PodsPerSide ? 0 : PodsPerSide) + !(i % 2);
         Pod& companionPod = Pods[companionPodIdx];
@@ -187,7 +189,7 @@ bool GameSimulator::Tick() {
     }
     MoveAndCollide();
     // Finishing work
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    for (int i = 0; i < PodCount; i++) {
         auto& pod = Pods[i];
         pod.Velocity *= 0.85;
         pod.Position = pod.Position.Floor();
@@ -196,7 +198,7 @@ bool GameSimulator::Tick() {
     // Else return true
     bool allDisabled = true, allOut = true;
     int finished1 = 0, finished2 = 0;
-    for (int i = 0; i < PodsPerSide * 2; i++) {
+    for (int i = 0; i < PodCount; i++) {
         auto& pod = Pods[i];
         if (pod.Finished) {
             (pod.IsEnemy ? finished2 : finished1)++;
@@ -223,7 +225,7 @@ void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUse
     ANN2 = ann2;
 }
 
-double GameSimulator::Fitness(double& out, int offset) {
+double GameSimulator::Fitness(double& out, int offset) const {
     out = 0;
     for (int i = 0; i < PodsPerSide; i++) {
         auto& pod = Pods[offset + i];
@@ -244,10 +246,15 @@ void GameSimulator::CalculateFitness() {
     Fitness(Fitness2, PodsPerSide);
 }
 
-bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2) {
+bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
     Reset(GA);
     SetANN(std::move(ann1), std::move(ann2));
-    while (Tick());
+    if (record) Snapshots.clear();
+    while (Tick()) {
+        if (record) {
+            Snapshots.emplace_back(*this);
+        }
+    }
     return ANN1Won;
 }
 
@@ -301,9 +308,19 @@ void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod) {
     WriteNeuron(ann, currentNeuron, posDiff.Angle() - pod.Facing);
 }
 
-void SelfPodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) {
+void SelfPodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) const {
     WriteNeuron(ann, currentNeuron, vr);
     WriteNeuron(ann, currentNeuron, vAngle);
 }
 
 float GameSimulator::FieldDiagonalLength = FieldSize.Abs();
+
+Snapshot::Snapshot(GameSimulator& simulator) {
+    CurrentTick = simulator.CurrentTick;
+    simulator.CalculateFitness();
+    Fitness1 = simulator.Fitness1;
+    Fitness2 = simulator.Fitness2;
+    for (int i = 0; i < GameSimulator::PodCount; i++) {
+        Pods[i] = simulator.Pods[i];
+    }
+}

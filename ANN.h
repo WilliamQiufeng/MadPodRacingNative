@@ -23,7 +23,7 @@ public:
     carr Biases;
     int WeightCount = 0, NeuronCount = 0, BiasCount = 0;
     std::array<int, Layers> Nodes;
-    constexpr static const std::array<int, Layers> DefaultNodes = {16, 32, 24, 12, 16, 2};
+    constexpr static const std::array<int, Layers> DefaultNodes = {18, 32, 24, 12, 16, 2};
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
@@ -93,30 +93,17 @@ public:
         }
     };
 
-    void Mate(const ANN<Layers>& another, const ANN<Layers>& to, float co_p, float mut_p) {
-        Crossover(another, to, co_p);
+    void Mate(const ANN<Layers>& another, const ANN<Layers>& to, float mut_p) {
+        Crossover(another, to);
         Mutate(to, mut_p);
     }
 
-    void Crossover(const ANN<Layers>& another, const ANN<Layers>& to, float probability) {
-        Crossover(Weights, another.Weights, to.Weights, WeightDistribution, probability);
-        Crossover(Biases, another.Biases, to.Biases, BiasDistribution, probability);
-//        Crossover2(Weights, another.Weights, to.Weights, WeightCount, probability);
-//        Crossover2(Biases, another.Biases, to.Biases,BiasCount, probability);
+    void Crossover(const ANN<Layers>& another, const ANN<Layers>& to) {
+        Crossover(Weights, another.Weights, to.Weights, WeightDistribution);
+        Crossover(Biases, another.Biases, to.Biases, BiasDistribution);
     }
 
-    void Crossover2(const carr& a1, const carr& a2, const carr& to, int len, float probability) {
-        for (int i = 0; i < len; i++) {
-            if (Distribution01(RNG) <= probability) {
-                to[i] = a2[i];
-            } else {
-                to[i] = a1[i];
-            }
-        }
-    }
-
-    void Crossover(const carr& a1, const carr& a2, const carr& to, std::uniform_int_distribution<int>& intDistrib,
-                   float probability) {
+    void Crossover(const carr& a1, const carr& a2, const carr& to, std::uniform_int_distribution<int>& intDistrib) {
         auto idx = intDistrib(RNG);
         std::memcpy(to.get(), a1.get(), idx);
         std::memcpy(to.get() + idx, a2.get() + idx, intDistrib.b() + 1 - idx);

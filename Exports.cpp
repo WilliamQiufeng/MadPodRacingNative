@@ -32,8 +32,8 @@ export_fn int TestMethod() {
     return 20;
 }
 
-export_fn intptr_t GSCreate(int podsPerSide, int totalLaps) {
-    return (std::intptr_t) new GameSimulator(podsPerSide, totalLaps);
+export_fn intptr_t GSCreate(int totalLaps) {
+    return (std::intptr_t) new GameSimulator(totalLaps);
 }
 export_fn void GSSetup(intptr_t sim, intptr_t ga) {
     auto gameSim = (GameSimulator *) sim;
@@ -52,6 +52,17 @@ export_fn void GSReset(intptr_t sim, intptr_t ga) {
     auto gameSim = (GameSimulator *) sim;
     gameSim->Reset((GAUsed *) ga);
 }
+export_fn bool GSRun(intptr_t sim, int ann1Idx, int ann2Idx, bool record) {
+    auto gs = (GameSimulator *) sim;
+    return gs->Run(gs->GA->ANNs[ann1Idx], gs->GA->ANNs[ann2Idx], record);
+}
+export_fn bool GSRunPtr(intptr_t sim, intptr_t ann1, intptr_t ann2, bool record) {
+    auto gs = (GameSimulator *) sim;
+    std::shared_ptr<ANNUsed> ann1Ptr, ann2Ptr;
+    ann1Ptr.reset((ANNUsed *) ann1);
+    ann2Ptr.reset((ANNUsed *) ann2);
+    return gs->Run(ann1Ptr, ann2Ptr, record);
+}
 export_fn void GSCalculateFitness(intptr_t sim) {
     ((GameSimulator *) sim)->CalculateFitness();
 }
@@ -60,6 +71,12 @@ export_fn double GSFitness1(intptr_t sim) {
 }
 export_fn double GSFitness2(intptr_t sim) {
     return ((GameSimulator *) sim)->Fitness2;
+}
+export_fn int GSSnapshotCount(std::intptr_t sim) {
+    return ((GameSimulator *) sim)->Snapshots.size();
+}
+export_fn intptr_t GSSnapshot(intptr_t sim, int idx) {
+    return (std::intptr_t) &((GameSimulator *) sim)->Snapshots[idx];
 }
 export_fn void GSSetupRandomANN(intptr_t sim) {
     auto& gs = *(GameSimulator *) sim;
@@ -72,7 +89,19 @@ export_fn void GSSetupRandomANN(intptr_t sim) {
 export_fn int GSCPCount(std::intptr_t sim) {
     return ((GameSimulator *) sim)->GA->CheckpointSize;
 }
+export_fn Pod *SnapshotGetPod(std::intptr_t snapshot, int idx) {
+    return &((Snapshot *) snapshot)->Pods[idx];
+}
+export_fn int SnapshotGetTick(std::intptr_t snapshot) {
+    return ((Snapshot *) snapshot)->CurrentTick;
+}
+export_fn double SnapshotGetFitness1(std::intptr_t snapshot) {
+    return ((Snapshot *) snapshot)->Fitness1;
+}
 
+export_fn double SnapshotGetFitness2(std::intptr_t snapshot) {
+    return ((Snapshot *) snapshot)->Fitness2;
+}
 export_fn intptr_t GACreate() {
     return (std::intptr_t) new GAUsed();
 }
@@ -104,7 +133,12 @@ export_fn Vec *GAGetCheckpoint(intptr_t ga, int idx) {
 export_fn int GACPCount(std::intptr_t ga) {
     return ((GAUsed *) ga)->CheckpointSize;
 }
-
+export_fn intptr_t GAGetANN(std::intptr_t ga, int idx) {
+    return (intptr_t) &((GAUsed *) ga)->ANNs[idx];
+}
+export_fn int GAPopulation() {
+    return GAUsed::PopulationCount;
+}
 export_fn bool GASave(intptr_t ga, const char *path) {
     return ((GAUsed *) ga)->Save(std::string(path));
 }

@@ -10,7 +10,7 @@ int main() {
     GA ga{};
     ga.Initialize();
     auto start = high_resolution_clock::now();
-    ga.Load("out.bin");
+//    ga.Load("out.bin");
     while(true) {
         ga.Generation();
         auto end = high_resolution_clock::now();
