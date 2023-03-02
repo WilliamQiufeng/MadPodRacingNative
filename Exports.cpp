@@ -134,7 +134,10 @@ export_fn int GACPCount(std::intptr_t ga) {
     return ((GAUsed *) ga)->CheckpointSize;
 }
 export_fn intptr_t GAGetANN(std::intptr_t ga, int idx) {
-    return (intptr_t) &((GAUsed *) ga)->ANNs[idx];
+    return (intptr_t) &(((GAUsed *) ga)->ANNs[idx]);
+}
+export_fn intptr_t GAGetSimulator(intptr_t ga) {
+    return (intptr_t) &((GAUsed *) ga)->Simulator;
 }
 export_fn int GAPopulation() {
     return GAUsed::PopulationCount;
@@ -144,6 +147,15 @@ export_fn bool GASave(intptr_t ga, const char *path) {
 }
 export_fn bool GALoad(intptr_t ga, const char *path) {
     return ((GAUsed *) ga)->Load(std::string(path));
+}
+export_fn bool GASavePlain(intptr_t ga, const char *path) {
+    return ((GAUsed *) ga)->SavePlain(std::string(path));
+}
+export_fn bool GALoadPlain(intptr_t ga, const char *path) {
+    return ((GAUsed *) ga)->LoadPlain(std::string(path));
+}
+export_fn bool ANNWriteCode(intptr_t ann, const char *path) {
+    return ((ANNUsed *) ann)->WriteCode(std::string(path));
 }
 
 export_fn double UtilCollisionTime(Vec v1, Vec v2, Vec p1, Vec p2, double r1, double r2) {

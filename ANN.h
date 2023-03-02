@@ -23,7 +23,7 @@ public:
     carr Biases;
     int WeightCount = 0, NeuronCount = 0, BiasCount = 0;
     std::array<int, Layers> Nodes;
-    constexpr static const std::array<int, Layers> DefaultNodes = {18, 32, 24, 12, 16, 2};
+    constexpr static const std::array<int, Layers> DefaultNodes = {18, 32, 24, 2};
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
@@ -123,16 +123,57 @@ public:
             }
         }
     }
+
     void Write(std::ostream& os) {
-        os.write((const char*)Weights.get(), sizeof(float) * WeightCount);
-        os.write((const char*)Biases.get(), sizeof(float) * BiasCount);
+        os.write((const char *) Weights.get(), sizeof(float) * WeightCount);
+        os.write((const char *) Biases.get(), sizeof(float) * BiasCount);
     }
+
+    void WritePlain(std::ostream& os) {
+        for (int i = 0; i < WeightCount; i++) {
+            os << Weights[i] << " ";
+        }
+        for (int i = 0; i < BiasCount; i++) {
+            os << Biases[i] << " ";
+        }
+    }
+
+    void WriteCode(std::ostream& os) {
+        os << "float weights[] = {";
+        for (int i = 0; i < WeightCount; i++) {
+            os << Weights[i];
+            if (i != WeightCount - 1) os << ", ";
+        }
+        os << "};\nfloat biases[] = {";
+        for (int i = 0; i < BiasCount; i++) {
+            os << Biases[i];
+            if (i != BiasCount - 1) os << ", ";
+        }
+        os << "};\n";
+    }
+
+    bool WriteCode(const std::string& path) {
+        std::ofstream os(path);
+        WriteCode(os);
+        os.close();
+        return os.good();
+    }
+
+    void ReadPlain(std::istream& is) {
+        for (int i = 0; i < WeightCount; i++) {
+            is >> Weights[i];
+        }
+        for (int i = 0; i < BiasCount; i++) {
+            is >> Biases[i];
+        }
+    }
+
     void Read(std::istream& is) {
-        is.read((char*)Weights.get(), sizeof(float) * WeightCount);
-        is.read((char*)Biases.get(), sizeof(float) * BiasCount);
+        is.read((char *) Weights.get(), sizeof(float) * WeightCount);
+        is.read((char *) Biases.get(), sizeof(float) * BiasCount);
     }
 };
 
-typedef ANN<6> ANNUsed;
+typedef ANN<4> ANNUsed;
 
 #endif //MADPODRACING_ANN_H

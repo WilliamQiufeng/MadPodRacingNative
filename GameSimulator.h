@@ -8,6 +8,7 @@
 #include <vector>
 #include <fstream>
 #include <chrono>
+#include <map>
 #include "Utils.h"
 #include "ANN.h"
 
@@ -65,7 +66,7 @@ struct Pod {
 
 void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
 
-template<int Population = 512>
+template<int Population = 256>
 class GA;
 
 typedef GA<> GAUsed;
@@ -85,7 +86,7 @@ public:
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
     static float FieldDiagonalLength;
-    bool ANN1Won, Finished;
+    bool ANN1Won, GameFinished, AllCheckpointsCompleted;
     std::vector<Snapshot> Snapshots;
 
     explicit GameSimulator(int totalLaps);
@@ -104,11 +105,17 @@ public:
 
     bool Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record = false);
 
+    bool RunForCompletion(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record = false);
+
     void Reset(GAUsed *ga);
 
     double Fitness(double& out, int offset) const;
 
+    double SpeedlessFitness(double& out, int offset) const;
+
     void CalculateFitness();
+
+    void CalculateSpeedlessFitness();
 
 
 };
@@ -134,19 +141,22 @@ public:
     int CheckpointSize;
     std::array<int, ANNUsed::LayersCount> Nodes;
     int GenerationCount = 0;
+    int LastRoundCompletionCount = 0;
+    std::map<std::shared_ptr<ANNUsed>, double> FitnessBuffer;
     constexpr static const int PodsPerSide = 2;
     constexpr static const int Laps = 5;
     constexpr static const int PopulationCount = Population;
-    constexpr static const int ChildrenCount = Population / 3 * 2;
+    constexpr static const int ChildrenCount = Population / 4;
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
-    constexpr static const int SelectionWeightBias = 50;
+    constexpr static const int SelectionWeightBias = 1;
+    constexpr static const int NeedCompletionPopulation = 2;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
-    std::uniform_int_distribution<int> DistributionX{GameSimulator::FieldSize.x};
-    std::uniform_int_distribution<int> DistributionY{GameSimulator::FieldSize.y};
-    std::uniform_int_distribution<int> DistributionCPCount{5};
+    std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x};
+    std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y};
+    std::uniform_int_distribution<int> DistributionCPCount{3, 5};
     std::discrete_distribution<int> DistributionSelection;
 public:
     GA() : RNG(RandomDevice()) {
@@ -207,6 +217,7 @@ public:
         RandomizeCheckpoints();
         Simulator.Reset(this);
         GenerationCount++;
+        LastRoundCompletionCount = 0;
     }
 
     void GenerationEnd() {
@@ -215,10 +226,15 @@ public:
 
     bool Generation() {
         auto start = high_resolution_clock::now();
+        std::cout << "Last round completed: " << LastRoundCompletionCount << ", needed " << NeedCompletionPopulation
+                  << std::endl;
+        auto forCompletion = LastRoundCompletionCount < NeedCompletionPopulation;
         GenerationStart();
-        for (int i = 0; i < 2; i++) {
+//        for (int i = 0; i < 3; i++)
+        if (forCompletion)
+            SortByFitness();
+        else
             TournamentSort();
-        }
         GenerationEnd();
         auto end = high_resolution_clock::now();
         auto durationNs = duration_cast<microseconds>(end - start);
@@ -226,8 +242,12 @@ public:
         std::cout << "Generation " << GenerationCount << ", " << CheckpointSize << " checkpoints: \n";
         for (int i = 0; i < 3; i++) {
             int against = DistributionSelection(RNG);
-            Simulator.Run(ANNs[i], ANNs[against]);
-            Simulator.CalculateFitness();
+            if (forCompletion) {
+                Simulator.RunForCompletion(ANNs[i], ANNs[against]);
+            } else {
+                Simulator.Run(ANNs[i], ANNs[against]);
+                Simulator.CalculateFitness();
+            }
             std::cout << i << " against " << against << ": " << Simulator.Fitness1 << " to " << Simulator.Fitness2;
             for (int j = 0; j < PodsPerSide * 2; j++) {
                 std::cout << " " << Simulator.Pods[j].CPPassed;
@@ -238,21 +258,43 @@ public:
         return true;
     }
 
-    void TournamentSort() {
-        auto separation = Population / 2;
-        while (separation) {
-            for (int i = 0; i < separation; i++) {
-                // former lost. swap with latter.
-                if (!Simulator.Run(ANNs[i], ANNs[i + separation])) {
-                    std::swap(ANNs[i], ANNs[i + separation]);
-                    std::cout << "L";
-                } else {
-                    std::cout << "W";
-                }
-            }
-            separation /= 2;
+    bool Compare(std::shared_ptr<ANNUsed>& a1, std::shared_ptr<ANNUsed>& a2) {
+        return FitnessBuffer[a1] > FitnessBuffer[a2];
+    }
+
+    void SortByFitness() {
+        FitnessBuffer.clear();
+        for (auto& ann: ANNs) {
+            Simulator.RunForCompletion(ann, ann);
+            if (Simulator.AllCheckpointsCompleted) LastRoundCompletionCount++;
+            FitnessBuffer[ann] = std::max(Simulator.Fitness1, Simulator.Fitness2);
         }
-        std::cout << std::endl;
+        std::sort(ANNs.begin(), ANNs.end(), [&](std::shared_ptr<ANNUsed>& a1, std::shared_ptr<ANNUsed>& a2) {
+            return Compare(a1, a2);
+        });
+    }
+
+    void TournamentSort() {
+        for (int round = 0; round < 4; round++) {
+            auto separation = Population / 2;
+            auto thisRoundCompletionCount = 0;
+            while (separation) {
+                for (int i = 0; i < separation; i++) {
+                    // former lost. swap with latter.
+                    auto ann1Won = Simulator.Run(ANNs[i], ANNs[i + separation]);
+                    if (!ann1Won) {
+                        std::swap(ANNs[i], ANNs[i + separation]);
+                        std::cout << "L";
+                    } else {
+                        std::cout << "W";
+                    }
+                    if (Simulator.AllCheckpointsCompleted) thisRoundCompletionCount++;
+                }
+                separation /= 2;
+            }
+            std::cout << std::endl;
+            LastRoundCompletionCount = std::max(thisRoundCompletionCount, LastRoundCompletionCount);
+        }
     }
 
     void ProduceOffsprings() {
@@ -281,6 +323,18 @@ public:
         }
     }
 
+    void WritePlain(std::ostream& os) {
+        for (auto& ann: ANNs) {
+            ann->WritePlain(os);
+        }
+    }
+
+    void ReadPlain(std::istream& is) {
+        for (auto& ann: ANNs) {
+            ann->ReadPlain(is);
+        }
+    }
+
     bool Save(const std::string& path) {
         std::ofstream os(path, std::ios::binary);
         Write(os);
@@ -291,6 +345,20 @@ public:
     bool Load(const std::string& path) {
         std::ifstream is(path, std::ios::binary);
         Read(is);
+        is.close();
+        return is.good();
+    }
+
+    bool SavePlain(const std::string& path) {
+        std::ofstream os(path);
+        WritePlain(os);
+        os.close();
+        return os.good();
+    }
+
+    bool LoadPlain(const std::string& path) {
+        std::ifstream is(path);
+        ReadPlain(is);
         is.close();
         return is.good();
     }

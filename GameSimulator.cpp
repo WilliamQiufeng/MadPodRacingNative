@@ -142,7 +142,7 @@ void GameSimulator::MoveAndCollide() const {
 
 
 bool GameSimulator::Tick() {
-    if (Finished) return false;
+    if (GameFinished) return false;
     for (int i = 0; i < PodCount; i++) {
         UpdatePodAI(i);
     }
@@ -163,24 +163,22 @@ bool GameSimulator::Tick() {
             // Goes back to first checkpoint after all laps
             if (pod.Lap >= TotalLaps && pod.NextCheckpointIndex != 0) {
                 pod.Finished = true;
-                // All finished.
-                if (companionPod.Finished) {
-                    ANN1Won = !pod.IsEnemy;
-                    Finished = true;
-                    return false;
-                }
-                continue;
+                // First one finished wins.
+                ANN1Won = !pod.IsEnemy;
+                GameFinished = true;
+                AllCheckpointsCompleted = true;
+                return false;
             }
             pod.NonCPTicks = 0;
         } else {
             pod.NonCPTicks++;
             if (pod.NonCPTicks >= 100) {
                 pod.IsOut = true;
-//                if (companionPod.IsOut) { // Two pods both out
-//                    ANN1Won = pod.IsEnemy;
-//                    Finished = true;
-//                    return false;
-//                }
+                if (companionPod.IsOut) { // Two pods both out
+                    ANN1Won = pod.IsEnemy;
+                    GameFinished = true;
+                    return false;
+                }
                 continue;
             }
         }
@@ -209,18 +207,20 @@ bool GameSimulator::Tick() {
     else if (!allOut) { // Some have finished
 //        std::cout << "Finish: " << finished1 << " to " << finished2 << std::endl;
         ANN1Won = finished1 >= finished2;
-        Finished = true;
+        GameFinished = true;
         return false;
     } else { // All out
         CalculateFitness();
         ANN1Won = Fitness1 > Fitness2;
-        Finished = true;
+        GameFinished = true;
         return false;
     }
     return true;
 }
 
 void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2) {
+//    ANN1 = std::move(ann1);
+//    ANN2 = std::move(ann2);
     ANN1 = std::move(ann1);
     ANN2 = std::move(ann2);
 }
@@ -241,9 +241,27 @@ double GameSimulator::Fitness(double& out, int offset) const {
     return out;
 }
 
+double GameSimulator::SpeedlessFitness(double& out, int offset) const {
+    out = 0;
+    for (int i = 0; i < PodsPerSide; i++) {
+        auto& pod = Pods[offset + i];
+        out += pod.CPPassed * 100;
+        if (!pod.Finished) {
+            auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
+            out += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 30);
+        }
+    }
+    return out;
+}
+
 void GameSimulator::CalculateFitness() {
     Fitness(Fitness1, 0);
     Fitness(Fitness2, PodsPerSide);
+}
+
+void GameSimulator::CalculateSpeedlessFitness() {
+    SpeedlessFitness(Fitness1, 0);
+    SpeedlessFitness(Fitness2, PodsPerSide);
 }
 
 bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
@@ -258,12 +276,27 @@ bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> 
     return ANN1Won;
 }
 
+bool GameSimulator::RunForCompletion(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
+    Reset(GA);
+    SetANN(std::move(ann1), std::move(ann2));
+    if (record) Snapshots.clear();
+    while (Tick()) {
+        if (record) {
+            Snapshots.emplace_back(*this);
+        }
+    }
+    CalculateFitness();
+    ANN1Won = Fitness1 > Fitness2 || Pods[0].Finished || Pods[1].Finished;
+    return ANN1Won;
+}
+
 void GameSimulator::Reset(GAUsed *ga) {
     Setup(ga);
     CurrentTick = 1;
     Fitness1 = Fitness2 = -1;
     ANN1Won = false;
-    Finished = false;
+    GameFinished = false;
+    AllCheckpointsCompleted = false;
 }
 
 GameSimulator::GameSimulator() = default;
