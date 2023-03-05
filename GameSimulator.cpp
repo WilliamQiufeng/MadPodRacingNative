@@ -264,6 +264,12 @@ void GameSimulator::CalculateSpeedlessFitness() {
     SpeedlessFitness(Fitness2, PodsPerSide);
 }
 
+double GameSimulator::Accuracy() {
+    CalculateFitness();
+    auto maxFitness = PodsPerSide * 150;
+    return std::max(Fitness1, Fitness2) / maxFitness;
+}
+
 bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
     Reset(GA);
     SetANN(std::move(ann1), std::move(ann2));

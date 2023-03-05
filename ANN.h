@@ -115,6 +115,8 @@ public:
     }
 
     void Mutate(const carr& a, const carr& to, int len, float probability) {
+        // TODO: Mutate around a value
+        // TODO: Mutate constant amount, not probability
         for (int i = 0; i < len; i++) {
             if (Distribution01(RNG) <= probability) {
                 to[i] = Distribution(RNG);

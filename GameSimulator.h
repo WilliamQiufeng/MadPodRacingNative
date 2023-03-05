@@ -117,6 +117,8 @@ public:
 
     void CalculateSpeedlessFitness();
 
+    double Accuracy();
+
 
 };
 
@@ -143,6 +145,8 @@ public:
     int GenerationCount = 0;
     int LastRoundCompletionCount = 0;
     std::map<std::shared_ptr<ANNUsed>, double> FitnessBuffer;
+    double Accuracy = 0;
+    double MaxAccuracy = 0;
     constexpr static const int PodsPerSide = 2;
     constexpr static const int Laps = 5;
     constexpr static const int PopulationCount = Population;
@@ -150,7 +154,7 @@ public:
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
     constexpr static const int SelectionWeightBias = 1;
-    constexpr static const int NeedCompletionPopulation = 2;
+    constexpr static const int NeedCompletionPopulation = 10;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
@@ -226,6 +230,7 @@ public:
 
     bool Generation() {
         auto start = high_resolution_clock::now();
+        Accuracy = MaxAccuracy = 0;
         std::cout << "Last round completed: " << LastRoundCompletionCount << ", needed " << NeedCompletionPopulation
                   << std::endl;
         auto forCompletion = LastRoundCompletionCount < NeedCompletionPopulation;
@@ -253,8 +258,11 @@ public:
                 std::cout << " " << Simulator.Pods[j].CPPassed;
             }
             std::cout << " done in " << Simulator.CurrentTick << " ticks, ";
-            std::cout << (Simulator.ANN1Won ? "Won" : "Lost") << std::endl;
+            std::cout << (Simulator.ANN1Won ? "Won" : "Lost");
+            std::cout << std::endl;
         }
+        std::cout << "Accuracy = " << Accuracy * 100 << "%" << std::endl;
+        std::cout << "Max accuracy = " << MaxAccuracy * 100 << "%" << std::endl;
         return true;
     }
 
@@ -268,7 +276,11 @@ public:
             Simulator.RunForCompletion(ann, ann);
             if (Simulator.AllCheckpointsCompleted) LastRoundCompletionCount++;
             FitnessBuffer[ann] = std::max(Simulator.Fitness1, Simulator.Fitness2);
+            auto acc = Simulator.Accuracy();
+            Accuracy += acc;
+            MaxAccuracy = std::max(MaxAccuracy, acc);
         }
+        Accuracy /= ANNs.size();
         std::sort(ANNs.begin(), ANNs.end(), [&](std::shared_ptr<ANNUsed>& a1, std::shared_ptr<ANNUsed>& a2) {
             return Compare(a1, a2);
         });
@@ -278,22 +290,29 @@ public:
         for (int round = 0; round < 4; round++) {
             auto separation = Population / 2;
             auto thisRoundCompletionCount = 0;
+            int count = 0;
+            double accuracySum = 0;
             while (separation) {
                 for (int i = 0; i < separation; i++) {
                     // former lost. swap with latter.
                     auto ann1Won = Simulator.Run(ANNs[i], ANNs[i + separation]);
                     if (!ann1Won) {
                         std::swap(ANNs[i], ANNs[i + separation]);
-                        std::cout << "L";
+//                        std::cout << "L";
                     } else {
-                        std::cout << "W";
+//                        std::cout << "W";
                     }
+                    count++;
+                    auto acc = Simulator.Accuracy();
+                    accuracySum += acc;
+                    MaxAccuracy = std::max(MaxAccuracy, acc);
                     if (Simulator.AllCheckpointsCompleted) thisRoundCompletionCount++;
                 }
                 separation /= 2;
             }
-            std::cout << std::endl;
+//            std::cout << std::endl;
             LastRoundCompletionCount = std::max(thisRoundCompletionCount, LastRoundCompletionCount);
+            Accuracy = std::max(Accuracy, accuracySum / count);
         }
     }
 

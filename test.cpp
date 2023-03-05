@@ -19,8 +19,10 @@ int main() {
     while (true) {
         ga.Generation();
         auto end = high_resolution_clock::now();
-        auto dur = duration_cast<minutes>(end - start);
-        if (dur.count() > 2) break;
+        auto durMin = duration_cast<minutes>(end - start);
+        auto durSec = duration_cast<seconds>(end - start);
+        std::cout << "Time total: " << durMin.count() << ":" << (durSec.count() - durMin.count() * 60) << std::endl;
+        if (durMin.count() > 8) break;
     }
     ga.Save(SaveBinPath);
     ga.SavePlain(SaveWeightsPath);
