@@ -10,7 +10,7 @@ int main() {
     GA ga{};
     ga.Initialize();
     auto start = high_resolution_clock::now();
-    const std::string SaveName = "test0302";
+    const std::string SaveName = "test0305";
     const auto SaveBinPath = SaveName + ".bin";
     const auto SaveWeightsPath = SaveName + ".weights.txt";
     const auto SaveCodePath = SaveName + ".cpp";
@@ -19,10 +19,12 @@ int main() {
     while (true) {
         ga.Generation();
         auto end = high_resolution_clock::now();
-        auto durMin = duration_cast<minutes>(end - start);
-        auto durSec = duration_cast<seconds>(end - start);
-        std::cout << "Time total: " << durMin.count() << ":" << (durSec.count() - durMin.count() * 60) << std::endl;
-        if (durMin.count() > 8) break;
+        auto durHrs = duration_cast<hours>(end - start).count();
+        auto totalMin = duration_cast<minutes>(end - start).count();
+        auto durMin = totalMin - durHrs * 60;
+        auto durSec = duration_cast<seconds>(end - start).count() - durHrs * 3600 - durMin * 60;
+        std::cout << "Time total: " << durHrs << " hr " << durMin << " min " << durSec << " s" << std::endl;
+        if (totalMin >= 30) break;
     }
     ga.Save(SaveBinPath);
     ga.SavePlain(SaveWeightsPath);

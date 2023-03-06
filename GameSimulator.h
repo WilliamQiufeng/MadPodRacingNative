@@ -253,6 +253,8 @@ public:
                 Simulator.Run(ANNs[i], ANNs[against]);
                 Simulator.CalculateFitness();
             }
+            if (std::isnan(Simulator.Fitness1)) { ;
+            }
             std::cout << i << " against " << against << ": " << Simulator.Fitness1 << " to " << Simulator.Fitness2;
             for (int j = 0; j < PodsPerSide * 2; j++) {
                 std::cout << " " << Simulator.Pods[j].CPPassed;

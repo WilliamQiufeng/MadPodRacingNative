@@ -16,6 +16,7 @@ class ANN {
     using carr = std::unique_ptr<float[]>;
 public:
     constexpr static const int LayersCount = Layers;
+    constexpr static const float WeightPower = 1.0f, BiasPower = 1.0f;
     std::array<int, Layers + 1> NeuronOffset;
     std::array<int, Layers> WeightOffset;
     carr Weights;
@@ -86,10 +87,10 @@ public:
 
     void Randomize() {
         for (int i = 0; i < WeightCount; i++) {
-            Weights[i] = Distribution(RNG);
+            Weights[i] = Distribution(RNG) * WeightPower;
         }
         for (int i = 0; i < BiasCount; i++) {
-            Biases[i] = Distribution(RNG);
+            Biases[i] = Distribution(RNG) * BiasPower;
         }
     };
 
@@ -110,19 +111,18 @@ public:
     }
 
     void Mutate(const ANN<Layers>& to, float probability) {
-        Mutate(Weights, to.Weights, WeightCount, probability);
-        Mutate(Biases, to.Biases, BiasCount, probability);
+        Mutate(Weights, to.Weights, WeightCount, probability, WeightDistribution, WeightPower);
+        Mutate(Biases, to.Biases, BiasCount, probability, BiasDistribution, BiasPower);
     }
 
-    void Mutate(const carr& a, const carr& to, int len, float probability) {
-        // TODO: Mutate around a value
-        // TODO: Mutate constant amount, not probability
-        for (int i = 0; i < len; i++) {
-            if (Distribution01(RNG) <= probability) {
-                to[i] = Distribution(RNG);
-            } else {
-                to[i] = a[i];
-            }
+    void Mutate(const carr& a, const carr& to, int len, float probability, std::uniform_int_distribution<int>& distrib,
+                float power) {
+        std::memcpy(to.get(), a.get(), sizeof(float) * len);
+        int count = (int) (len * probability);
+        for (int i = 0; i < count; i++) {
+            auto index = distrib(RNG);
+            auto val = Distribution(RNG) * power;
+            to[index] = val;
         }
     }
 
