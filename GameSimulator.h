@@ -162,6 +162,8 @@ private:
     std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y};
     std::uniform_int_distribution<int> DistributionCPCount{3, 5};
     std::discrete_distribution<int> DistributionSelection;
+    std::ofstream StatsCsvFile;
+    bool LogStats = false;
 public:
     GA() : RNG(RandomDevice()) {
         for (int i = 0; i < Population; i++) {
@@ -265,6 +267,10 @@ public:
         }
         std::cout << "Accuracy = " << Accuracy * 100 << "%" << std::endl;
         std::cout << "Max accuracy = " << MaxAccuracy * 100 << "%" << std::endl;
+        if (LogStats) {
+            StatsCsvFile << GenerationCount << "," << CheckpointSize << "," << Accuracy << "," << MaxAccuracy << ","
+                         << LastRoundCompletionCount << std::endl;
+        }
         return true;
     }
 
@@ -382,6 +388,16 @@ public:
         ReadPlain(is);
         is.close();
         return is.good();
+    }
+
+    void SetupStatsCsvFile(const std::string& path) {
+        StatsCsvFile.open(path);
+        LogStats = true;
+        StatsCsvFile << "Generation,Checkpoints,AvgAcc,MaxAcc,Completed\n";
+    }
+
+    ~GA() {
+        StatsCsvFile.close();
     }
 };
 
