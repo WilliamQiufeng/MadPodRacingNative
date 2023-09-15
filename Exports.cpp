@@ -95,11 +95,11 @@ export_fn Pod *SnapshotGetPod(std::intptr_t snapshot, int idx) {
 export_fn int SnapshotGetTick(std::intptr_t snapshot) {
     return ((Snapshot *) snapshot)->CurrentTick;
 }
-export_fn double SnapshotGetFitness1(std::intptr_t snapshot) {
+export_fn fitness_t SnapshotGetFitness1(std::intptr_t snapshot) {
     return ((Snapshot *) snapshot)->Fitness1;
 }
 
-export_fn double SnapshotGetFitness2(std::intptr_t snapshot) {
+export_fn fitness_t SnapshotGetFitness2(std::intptr_t snapshot) {
     return ((Snapshot *) snapshot)->Fitness2;
 }
 export_fn intptr_t GACreate() {

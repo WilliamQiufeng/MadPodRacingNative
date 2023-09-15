@@ -24,7 +24,7 @@ public:
     carr Biases;
     int WeightCount = 0, NeuronCount = 0, BiasCount = 0;
     std::array<int, Layers> Nodes;
-    constexpr static const std::array<int, Layers> DefaultNodes = {18, 32, 24, 2};
+    constexpr static const std::array<int, Layers> DefaultNodes = {18, 31, 7, 2};
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
@@ -80,7 +80,7 @@ public:
                     weightOffset++;
                 }
                 Neurons[j] += Biases[j - NeuronOffset[1]];
-                Neurons[j] = tanh(Neurons[j]);
+                Neurons[j] = tanh(Neurons[j]);;
             }
         }
     };

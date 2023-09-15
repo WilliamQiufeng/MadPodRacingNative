@@ -30,6 +30,7 @@ struct SelfPodEncodeInfo {
     void Write(ANNUsed& ann, int& currentNeuron) const;
 };
 
+typedef int fitness_t;
 
 struct Pod {
     Vec Position, LastPosition;
@@ -66,7 +67,7 @@ struct Pod {
 
 void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
 
-template<int Population = 256>
+template<int Population = 128>
 class GA;
 
 typedef GA<> GAUsed;
@@ -81,7 +82,7 @@ public:
     int TotalLaps = 3, CurrentTick = 1;
     constexpr const static int PodsPerSide = 2;
     constexpr const static int PodCount = PodsPerSide * 2;
-    double Fitness1, Fitness2;
+    fitness_t Fitness1, Fitness2;
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
@@ -109,13 +110,13 @@ public:
 
     void Reset(GAUsed *ga);
 
-    double Fitness(double& out, int offset) const;
+    fitness_t Fitness(fitness_t& out, int offset) const;
 
-    double SpeedlessFitness(double& out, int offset) const;
+    fitness_t CompetitiveFitness(fitness_t& out, int offset) const;
 
     void CalculateFitness();
 
-    void CalculateSpeedlessFitness();
+    void CalculateCompetitiveFitness();
 
     double Accuracy();
 
@@ -126,7 +127,7 @@ struct Snapshot {
 public:
     std::array<Pod, GameSimulator::PodCount> Pods;
     int CurrentTick;
-    double Fitness1, Fitness2;
+    fitness_t Fitness1, Fitness2;
 
     explicit Snapshot(GameSimulator& simulator);
 };
@@ -136,7 +137,7 @@ class GA {
 public:
     std::array<std::shared_ptr<ANNUsed>, Population> ANNs;
     GameSimulator Simulator;
-    std::array<double, Population> SelectionWeights;
+    std::array<int, Population> SelectionWeights;
     std::shared_ptr<Vec[]> Checkpoints;
     std::shared_ptr<Vec[]> CPDiffWithBefore;
     std::shared_ptr<double[]> CPDistWithBefore;
@@ -153,13 +154,13 @@ public:
     constexpr static const int ChildrenCount = Population / 4;
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
-    constexpr static const int SelectionWeightBias = 1;
+    constexpr static const int SelectionWeightBias = Population / 3;
     constexpr static const int NeedCompletionPopulation = 10;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
-    std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x};
-    std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y};
+    std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x / 4};
+    std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y / 4};
     std::uniform_int_distribution<int> DistributionCPCount{3, 5};
     std::discrete_distribution<int> DistributionSelection;
     std::ofstream StatsCsvFile;
@@ -177,12 +178,16 @@ public:
         Checkpoints.reset(new Vec[CheckpointSize]);
         CPDiffWithBefore.reset(new Vec[CheckpointSize]);
         CPDistWithBefore.reset(new double[CheckpointSize]);
+        int curX = GameSimulator::FieldSize.x / 2;
+        int curY = GameSimulator::FieldSize.y / 2;
+        curX += DistributionX(RNG);
+        curY += DistributionY(RNG);
         for (int i = 0; i < CheckpointSize; i++) {
             int tries = 0;
             while (true) {
                 int x = DistributionX(RNG);
                 int y = DistributionY(RNG);
-                Checkpoints[i] = {x, y};
+                Checkpoints[i] = {curX + x, curY + y};
                 bool rethrow = false;
                 for (int j = 0; j < i; j++) {
                     if ((Checkpoints[i] - Checkpoints[j]).SqDist() <= GameSimulator::CPDiameterSq) {
@@ -190,8 +195,11 @@ public:
                         break;
                     }
                 }
-                if (!rethrow || ++tries > 10) break;
+                if (x < 0 || y < 0 || x > GameSimulator::FieldSize.x || y > GameSimulator::FieldSize.y) rethrow = true;
+                else if (!rethrow || ++tries > 10) break;
             }
+            curX = Checkpoints[i].x;
+            curY = Checkpoints[i].y;
         }
         for (int i = 0; i < CheckpointSize; i++) {
             auto nextIdx = (i + 1) % CheckpointSize;
@@ -236,6 +244,7 @@ public:
         std::cout << "Last round completed: " << LastRoundCompletionCount << ", needed " << NeedCompletionPopulation
                   << std::endl;
         auto forCompletion = LastRoundCompletionCount < NeedCompletionPopulation;
+//        forCompletion = true;
         GenerationStart();
 //        for (int i = 0; i < 3; i++)
         if (forCompletion)
@@ -254,8 +263,6 @@ public:
             } else {
                 Simulator.Run(ANNs[i], ANNs[against]);
                 Simulator.CalculateFitness();
-            }
-            if (std::isnan(Simulator.Fitness1)) { ;
             }
             std::cout << i << " against " << against << ": " << Simulator.Fitness1 << " to " << Simulator.Fitness2;
             for (int j = 0; j < PodsPerSide * 2; j++) {

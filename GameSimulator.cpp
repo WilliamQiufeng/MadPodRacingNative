@@ -225,30 +225,31 @@ void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUse
     ANN2 = std::move(ann2);
 }
 
-double GameSimulator::Fitness(double& out, int offset) const {
+fitness_t GameSimulator::Fitness(fitness_t& out, int offset) const {
     out = 0;
     for (int i = 0; i < PodsPerSide; i++) {
         auto& pod = Pods[offset + i];
-        out += pod.CPPassed / (double) CurrentTick * 5000;
+        out += pod.CPPassed * 1000 - CurrentTick;
         if (!pod.Finished) {
             auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
-            out += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 30);
+            auto checkpointDist = GA->CPDistWithBefore[pod.NextCheckpointIndex];
+            out += std::clamp<fitness_t>(checkpointDist / posDiff.Abs() * 1000, 0, 1000);
         }
         if (pod.IsOut) continue;
-        if (pod.Finished) out += 200; // ?
-        if (pod.Boosted) out += 10;
+        if (pod.Finished) out += 3000; // ?
+        if (pod.Boosted) out += 200;
     }
     return out;
 }
 
-double GameSimulator::SpeedlessFitness(double& out, int offset) const {
+fitness_t GameSimulator::CompetitiveFitness(fitness_t& out, int offset) const {
     out = 0;
     for (int i = 0; i < PodsPerSide; i++) {
         auto& pod = Pods[offset + i];
         out += pod.CPPassed * 100;
         if (!pod.Finished) {
             auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
-            out += std::clamp<double>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 30);
+            out += std::clamp<fitness_t>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 30);
         }
     }
     return out;
@@ -259,15 +260,15 @@ void GameSimulator::CalculateFitness() {
     Fitness(Fitness2, PodsPerSide);
 }
 
-void GameSimulator::CalculateSpeedlessFitness() {
-    SpeedlessFitness(Fitness1, 0);
-    SpeedlessFitness(Fitness2, PodsPerSide);
+void GameSimulator::CalculateCompetitiveFitness() {
+    CompetitiveFitness(Fitness1, 0);
+    CompetitiveFitness(Fitness2, PodsPerSide);
 }
 
 double GameSimulator::Accuracy() {
     CalculateFitness();
-    auto maxFitness = PodsPerSide * 150;
-    return std::max(Fitness1, Fitness2) / maxFitness;
+    auto maxFitness = PodsPerSide * 25000;
+    return std::max(Fitness1, Fitness2) / (double) maxFitness;
 }
 
 bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
