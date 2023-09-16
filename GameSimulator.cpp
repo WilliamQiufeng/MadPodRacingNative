@@ -12,7 +12,7 @@ GameSimulator::GameSimulator(int totalLaps) : TotalLaps(totalLaps) {
 
 void GameSimulator::Setup(GAUsed *ga) {
     GA = ga;
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         Vec pos = GA->Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
         Pods[i] = Pod{
                 pos,
@@ -27,18 +27,19 @@ void GameSimulator::Setup(GAUsed *ga) {
                 i >= PodsPerSide,
                 1,
                 1,
-                0};
+                0
+        };
     }
 }
 
 void GameSimulator::UpdatePodAI(int podIndex) {
     int currentNeuron = 0;
     Pod& currentPod = Pods[podIndex];
-    ANNUsed& ann = *(podIndex < PodsPerSide ? ANN1 : ANN2);
+    ANNUsed& ann = *Controllers[podIndex].ANN;
     currentPod.EncodeSelf().Write(ann, currentNeuron);
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         // If enemy, start filling enemy data first
-        int j = podIndex < PodsPerSide ? i : (i + PodsPerSide) % PodCount;
+        int j = podIndex < PodsPerSide ? i : (i + PodsPerSide) % TotalPods;
         if (j == podIndex) continue;
         Pod& pod = Pods[j];
         if (pod.IsEnabled())
@@ -99,10 +100,10 @@ void GameSimulator::MoveAndCollide() {
     double remainTime = 1;
     // O(N^2?)
     while (remainTime > 0) {
-        for (int i = 0; i < PodCount; i++) {
+        for (int i = 0; i < TotalPods; i++) {
             auto& pod = Pods[i];
             if (!pod.IsEnabled()) continue;
-            for (int j = i + 1; j < PodCount; j++) {
+            for (int j = i + 1; j < TotalPods; j++) {
                 auto& anotherPod = Pods[j];
                 if (!pod.IsEnabled()) continue;
                 if (i == lastI && j == lastJ) continue;
@@ -116,14 +117,14 @@ void GameSimulator::MoveAndCollide() {
             }
         }
         if (minNextCldTime > remainTime) { // No more collisions
-            for (int i = 0; i < PodCount; i++) {
+            for (int i = 0; i < TotalPods; i++) {
                 auto& pod = Pods[i];
                 if (!pod.IsEnabled()) continue;
                 pod.Position += pod.Velocity * remainTime;
             }
             break;
         }
-        for (int i = 0; i < PodCount; i++) {
+        for (int i = 0; i < TotalPods; i++) {
             auto& pod = Pods[i];
             if (!pod.IsEnabled()) continue;
             pod.Position += pod.Velocity * minNextCldTime;
@@ -142,10 +143,10 @@ void GameSimulator::MoveAndCollide() {
 
 bool GameSimulator::Tick() {
     if (GameFinished) return false;
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         UpdatePodAI(i);
     }
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         auto& pod = Pods[i];
         int companionPodIdx = (i < PodsPerSide ? 0 : PodsPerSide) + !(i % 2);
         Pod& companionPod = Pods[companionPodIdx];
@@ -186,7 +187,7 @@ bool GameSimulator::Tick() {
     }
     MoveAndCollide();
     // Finishing work
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         auto& pod = Pods[i];
         pod.Velocity *= 0.85;
         pod.Position = pod.Position.Floor();
@@ -195,7 +196,7 @@ bool GameSimulator::Tick() {
     // Else return true
     bool allDisabled = true, allOut = true;
     int finished1 = 0, finished2 = 0;
-    for (int i = 0; i < PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         auto& pod = Pods[i];
         if (pod.Finished) {
             (pod.IsEnemy ? finished2 : finished1)++;
@@ -210,18 +211,15 @@ bool GameSimulator::Tick() {
         return false;
     } else { // All out
         CalculateFitness();
-        ANN1Won = Fitness1 > Fitness2;
+        ANN1Won = MaxFitness(0) > MaxFitness(PodsPerSide);
         GameFinished = true;
         return false;
     }
     return true;
 }
 
-void GameSimulator::SetANN(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2) {
-//    ANN1 = std::move(ann1);
-//    ANN2 = std::move(ann2);
-    ANN1 = std::move(ann1);
-    ANN2 = std::move(ann2);
+void GameSimulator::SetANN(ControllerStorage<TotalPods> anns) {
+    Controllers = anns;
 }
 
 fitness_t GameSimulator::Fitness(fitness_t& out, int offset) const {
@@ -254,25 +252,39 @@ fitness_t GameSimulator::CompetitiveFitness(fitness_t& out, int offset) const {
     return out;
 }
 
+fitness_t GameSimulator::MaxFitness(int offset) const {
+    return std::max(Controllers[offset].Fitness, Controllers[offset + 1].Fitness);
+}
+
+fitness_t GameSimulator::MaxFitnessByRole(PodRole role) const {
+    fitness_t maxFitness = std::numeric_limits<fitness_t>::min();
+    for (const auto& controller: Controllers) {
+        if (controller.Role == role && controller.Fitness > maxFitness) maxFitness = controller.Fitness;
+    }
+    return maxFitness;
+}
+
 void GameSimulator::CalculateFitness() {
-    Fitness(Fitness1, 0);
-    Fitness(Fitness2, PodsPerSide);
+    for (int i = 0; i < TotalPods; i++) {
+        Fitness(Controllers[i].Fitness, i);
+    }
 }
 
 void GameSimulator::CalculateCompetitiveFitness() {
-    CompetitiveFitness(Fitness1, 0);
-    CompetitiveFitness(Fitness2, PodsPerSide);
+    for (int i = 0; i < TotalPods; i++) {
+        CompetitiveFitness(Controllers[i].Fitness, i);
+    }
 }
 
 double GameSimulator::Accuracy() {
     CalculateFitness();
     auto maxFitness = PodsPerSide * 25000;
-    return std::max(Fitness1, Fitness2) / (double) maxFitness;
+    return std::max(MaxFitness(0), MaxFitness(PodsPerSide)) / (double) maxFitness;
 }
 
-bool GameSimulator::Run(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record) {
+bool GameSimulator::Run(ControllerStorage<TotalPods> anns, bool record) {
     Reset(GA);
-    SetANN(std::move(ann1), std::move(ann2));
+    SetANN(anns);
     if (record) Snapshots.clear();
     while (Tick()) {
         if (record) {
@@ -282,9 +294,9 @@ bool GameSimulator::Run(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool recor
     return ANN1Won;
 }
 
-bool GameSimulator::RunForCompletion(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record) {
+bool GameSimulator::RunForCompletion(ControllerStorage<TotalPods> anns, bool record) {
     Reset(GA);
-    SetANN(std::move(ann1), std::move(ann2));
+    SetANN(anns);
     if (record) Snapshots.clear();
     while (Tick()) {
         if (record) {
@@ -292,14 +304,13 @@ bool GameSimulator::RunForCompletion(ANNUsed::Pointer ann1, ANNUsed::Pointer ann
         }
     }
     CalculateFitness();
-    ANN1Won = Fitness1 > Fitness2 || Pods[0].Finished || Pods[1].Finished;
+    ANN1Won = MaxFitness(0) > MaxFitness(PodsPerSide) || Pods[0].Finished || Pods[1].Finished;
     return ANN1Won;
 }
 
 void GameSimulator::Reset(GAUsed *ga) {
     Setup(ga);
     CurrentTick = 1;
-    Fitness1 = Fitness2 = -1;
     ANN1Won = false;
     GameFinished = false;
     AllCheckpointsCompleted = false;
@@ -357,9 +368,7 @@ float GameSimulator::FieldDiagonalLength = FieldSize.Abs();
 Snapshot::Snapshot(GameSimulator& simulator) {
     CurrentTick = simulator.CurrentTick;
     simulator.CalculateFitness();
-    Fitness1 = simulator.Fitness1;
-    Fitness2 = simulator.Fitness2;
-    for (int i = 0; i < GameSimulator::PodCount; i++) {
+    for (int i = 0; i < TotalPods; i++) {
         Pods[i] = simulator.Pods[i];
     }
 }

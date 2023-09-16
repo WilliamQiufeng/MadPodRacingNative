@@ -16,6 +16,7 @@ using namespace std::chrono;
 
 
 constexpr static const int PodsPerSide = 2;
+constexpr static const int TotalPods = PodsPerSide * 2;
 constexpr static const int Laps = 5;
 
 void WriteNeuron(ANNUsed& ann, int& currentNeuron, float val);
@@ -35,9 +36,11 @@ struct SelfPodEncodeInfo {
 };
 
 typedef int fitness_t;
-enum PodType {
+enum class PodRole {
+    Unknown,
     RunnerPod,
-    DefenderPod
+    DefenderPod,
+    PIDPod,
 };
 
 struct Pod {
@@ -58,7 +61,6 @@ struct Pod {
     bool Finished = false;
     bool IsCollided = false;
     int CPPassed = 0;
-    PodType Type;
 
     constexpr const static float NormalMass = 1, ShieldMass = 10;
     constexpr const static int Radius = 400, RadiusSq = Radius * Radius;
@@ -84,72 +86,22 @@ typedef GA<> GAUsed;
 struct Snapshot;
 
 
-class GameSimulator {
-public:
-    std::array<Pod, PodsPerSide * 2> Pods;
-    GAUsed *GA = nullptr;
-    ANNUsed::Pointer ANN1, ANN2;
-    int TotalLaps = 3, CurrentTick = 1;
-    constexpr const static int PodsPerSide = 2;
-    constexpr const static int PodCount = PodsPerSide * 2;
-    fitness_t Fitness1, Fitness2;
-    constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
-    constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
-    constexpr static const Vec FieldSize{16000, 8000};
-    static float FieldDiagonalLength;
-    bool ANN1Won, GameFinished, AllCheckpointsCompleted;
-    std::vector<Snapshot> Snapshots;
-
-    explicit GameSimulator(int totalLaps);
-
-    GameSimulator();
-
-    void SetANN(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2);
-
-    void Setup(GAUsed *ga);
-
-    void MoveAndCollide();
-
-    void UpdatePodAI(int podIndex);
-
-    bool Tick();
-
-    bool Run(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record = false);
-
-    bool RunForCompletion(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record = false);
-
-    void Reset(GAUsed *ga);
-
-    fitness_t Fitness(fitness_t& out, int offset) const;
-
-    fitness_t CompetitiveFitness(fitness_t& out, int offset) const;
-
-    void CalculateFitness();
-
-    void CalculateCompetitiveFitness();
-
-    double Accuracy();
-
-
+struct Controller {
+    ANNUsed::Pointer ANN;
+    PodRole Role;
+    fitness_t Fitness;
 };
 
-struct Snapshot {
-public:
-    std::array<Pod, GameSimulator::PodCount> Pods;
-    int CurrentTick;
-    fitness_t Fitness1, Fitness2;
-
-    explicit Snapshot(GameSimulator& simulator);
-};
-
+template<int Population>
+using ControllerStorage = std::array<Controller, Population>;
 template<int Population>
 class ANNPopulation {
     struct RandomSelectionResult {
         int Index;
-        ANNUsed::Pointer& ANN;
+        Controller& Controller;
     };
 public:
-    std::array<ANNUsed::Pointer, Population> Storage;
+    ControllerStorage<Population> Storage;
     std::map<ANNUsed::Pointer, double> FitnessBuffer;
     std::discrete_distribution<int> DistributionSelection;
     std::mt19937 RNG;
@@ -168,12 +120,13 @@ public:
         DistributionSelection = std::discrete_distribution(SelectionWeights.begin(), SelectionWeights.end());
     }
 
-    void Initialize(std::array<int, ANNUsed::LayersCount> nodes) {
+    void Initialize(std::array<int, ANNUsed::LayersCount> nodes, PodRole assignedRole) {
         Nodes = nodes;
-        for (auto& ann: Storage) {
+        for (auto& [ann, role, fitness]: Storage) {
             ann = std::make_shared<ANNUsed>();
             ann->InitializeSpace(nodes);
             ann->Randomize();
+            role = assignedRole;
         }
     }
 
@@ -190,12 +143,83 @@ public:
             auto [motherIdx, mother] = SelectRandom();
             newANN = std::make_shared<ANNUsed>();
             newANN->InitializeSpace(Nodes);
-            father->Mate(*mother, *newANN, MutateProbability);
+            father.ANN->Mate(*mother.ANN, *newANN, MutateProbability);
         }
         for (int i = 0; i < ChildrenCount; i++) {
-            Storage[Population - i - 1] = offsprings[i];
+            Storage[Population - i - 1].ANN = offsprings[i];
         }
     }
+
+    void SortByFitness() {
+        std::sort(Storage.begin(), Storage.end(), [&](Controller& c1, Controller& c2) {
+            return c1.Fitness > c2.Fitness;
+        });
+    }
+};
+
+class GameSimulator {
+public:
+    std::array<Pod, TotalPods> Pods;
+    GAUsed *GA = nullptr;
+    std::array<Controller, TotalPods> Controllers;
+    int TotalLaps = 3, CurrentTick = 1;
+    constexpr static const std::array<PodRole, 4> DefaultPodRoles = {
+            PodRole::RunnerPod, PodRole::DefenderPod,
+            PodRole::RunnerPod, PodRole::DefenderPod
+    };
+    constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
+    constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
+    constexpr static const Vec FieldSize{16000, 8000};
+    static float FieldDiagonalLength;
+    bool ANN1Won, GameFinished, AllCheckpointsCompleted;
+    std::vector<Snapshot> Snapshots;
+
+    explicit GameSimulator(int totalLaps);
+
+    GameSimulator();
+
+    void SetANN(ControllerStorage<TotalPods> anns);
+
+    /**
+     * Sets or resets pods and GA
+     * @param ga GA
+     */
+    void Setup(GAUsed *ga);
+
+    void MoveAndCollide();
+
+    void UpdatePodAI(int podIndex);
+
+    bool Tick();
+
+    bool Run(ControllerStorage<TotalPods> anns, bool record = false);
+
+    bool RunForCompletion(ControllerStorage<TotalPods> anns, bool record = false);
+
+    void Reset(GAUsed *ga);
+
+    fitness_t Fitness(fitness_t& out, int offset) const;
+
+    fitness_t CompetitiveFitness(fitness_t& out, int offset) const;
+
+    [[nodiscard]] fitness_t MaxFitness(int offset) const;
+
+    [[nodiscard]] fitness_t MaxFitnessByRole(PodRole role) const;
+
+    void CalculateFitness();
+
+    void CalculateCompetitiveFitness();
+
+    double Accuracy();
+
+};
+
+struct Snapshot {
+public:
+    std::array<Pod, TotalPods> Pods;
+    int CurrentTick;
+
+    explicit Snapshot(GameSimulator& simulator);
 };
 
 
@@ -211,7 +235,6 @@ public:
     int CheckpointSize;
     int GenerationCount = 0;
     int LastRoundCompletionCount = 0;
-    std::map<ANNUsed::Pointer, double> FitnessBuffer;
     double Accuracy = 0;
     double MaxAccuracy = 0;
     constexpr static const int PopulationCount = Population;
@@ -265,8 +288,8 @@ public:
 
     void Initialize(const std::array<int, ANNUsed::LayersCount>& nodes = ANNUsed::DefaultNodes) {
         RandomizeCheckpoints();
-        RunnerANNs.Initialize(nodes);
-        DefenderANNs.Initialize(nodes);
+        RunnerANNs.Initialize(nodes, PodRole::RunnerPod);
+        DefenderANNs.Initialize(nodes, PodRole::DefenderPod);
         Simulator = GameSimulator(Laps);
         Simulator.Setup(this);
     }
@@ -309,15 +332,19 @@ public:
         std::cout << durationNs.count() << std::endl;
         std::cout << "Generation " << GenerationCount << ", " << CheckpointSize << " checkpoints: \n";
         for (int i = 0; i < 3; i++) {
-            auto [opponentIdx, opponent] = RunnerANNs.SelectRandom();
+            auto proponentRunner = RunnerANNs.Storage[i];
+            auto proponentDefender = DefenderANNs.Storage[i];
+            auto [opponentRunnerIdx, opponentRunner] = RunnerANNs.SelectRandom();
+            auto [opponentDefenderIdx, opponentDefender] = DefenderANNs.SelectRandom();
             if (forCompletion) {
-                Simulator.RunForCompletion(RunnerANNs.Storage[i], opponent);
+                Simulator.RunForCompletion({proponentRunner, proponentDefender, opponentRunner, opponentDefender});
             } else {
-                Simulator.Run(RunnerANNs.Storage[i], opponent);
+                Simulator.Run({proponentRunner, proponentDefender, opponentRunner, opponentDefender});
                 Simulator.CalculateFitness();
             }
-            std::cout << i << " against " << opponentIdx << ": " << Simulator.Fitness1 << " to " << Simulator.Fitness2;
-            for (int j = 0; j < PodsPerSide * 2; j++) {
+            std::cout << i << " against " << opponentRunnerIdx << ": " << Simulator.MaxFitness(0) << " to "
+                      << Simulator.MaxFitness(PodsPerSide);
+            for (int j = 0; j < TotalPods; j++) {
                 std::cout << " " << Simulator.Pods[j].CPPassed;
             }
             std::cout << " done in " << Simulator.CurrentTick << " ticks, ";
@@ -333,35 +360,24 @@ public:
         return true;
     }
 
-    bool Compare(ANNUsed::Pointer& a1, ANNUsed::Pointer& a2) {
-        return FitnessBuffer[a1] > FitnessBuffer[a2];
-    }
-
     void SortByFitness() {
-        FitnessBuffer.clear();
         for (int i = 0; i < Population; i++) {
-            auto& runnerANN = RunnerANNs.Storage[i];
-            auto& defenderANN = DefenderANNs.Storage[i];
-            Simulator.RunForCompletion(runnerANN, defenderANN);
+            auto& runnerController = RunnerANNs.Storage[i];
+            auto& defenderController = DefenderANNs.Storage[i];
+            Simulator.RunForCompletion({runnerController, defenderController, runnerController, defenderController});
             if (Simulator.AllCheckpointsCompleted) LastRoundCompletionCount++;
-            RunnerANNs.FitnessBuffer[runnerANN] = Simulator.Fitness1;
-            DefenderANNs.FitnessBuffer[defenderANN] = Simulator.Fitness2;
+            Simulator.CalculateFitness();
             auto acc = Simulator.Accuracy();
             Accuracy += acc;
             MaxAccuracy = std::max(MaxAccuracy, acc);
         }
         Accuracy /= Population;
-        std::sort(RunnerANNs.Storage.begin(), RunnerANNs.Storage.end(),
-                  [&](ANNUsed::Pointer& a1, ANNUsed::Pointer& a2) {
-                      return Compare(a1, a2);
-                  });
-        std::sort(DefenderANNs.Storage.begin(), DefenderANNs.Storage.end(),
-                  [&](ANNUsed::Pointer& a1, ANNUsed::Pointer& a2) {
-                      return Compare(a1, a2);
-                  });
+        RunnerANNs.SortByFitness();
+        DefenderANNs.SortByFitness();
     }
 
     void TournamentSort() {
+        // TODO
         for (int round = 0; round < 4; round++) {
             auto separation = Population / 2;
             auto thisRoundCompletionCount = 0;
@@ -394,25 +410,25 @@ public:
 
     // TODO
     void Write(std::ostream& os) {
-        for (auto& ann: RunnerANNs.Storage) {
+        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
             ann->Write(os);
         }
     }
 
     void Read(std::istream& is) {
-        for (auto& ann: RunnerANNs.Storage) {
+        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
             ann->Read(is);
         }
     }
 
     void WritePlain(std::ostream& os) {
-        for (auto& ann: RunnerANNs.Storage) {
+        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
             ann->WritePlain(os);
         }
     }
 
     void ReadPlain(std::istream& is) {
-        for (auto& ann: RunnerANNs.Storage) {
+        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
             ann->ReadPlain(is);
         }
     }

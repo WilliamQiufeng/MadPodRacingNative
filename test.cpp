@@ -31,6 +31,6 @@ int main() {
     }
     ga.Save(SaveBinPath);
     ga.SavePlain(SaveWeightsPath);
-    ga.RunnerANNs.Storage[0]->WriteCode(SaveCodePath);
+    ga.RunnerANNs.Storage[0].ANN->WriteCode(SaveCodePath);
     return 0;
 }
