@@ -54,11 +54,11 @@ export_fn void GSReset(intptr_t sim, intptr_t ga) {
 }
 export_fn bool GSRun(intptr_t sim, int ann1Idx, int ann2Idx, bool record) {
     auto gs = (GameSimulator *) sim;
-    return gs->Run(gs->GA->ANNs[ann1Idx], gs->GA->ANNs[ann2Idx], record);
+    return gs->Run(gs->GA->RunnerANNs.Storage[ann1Idx], gs->GA->RunnerANNs.Storage[ann2Idx], record);
 }
 export_fn bool GSRunPtr(intptr_t sim, intptr_t ann1, intptr_t ann2, bool record) {
     auto gs = (GameSimulator *) sim;
-    std::shared_ptr<ANNUsed> ann1Ptr, ann2Ptr;
+    ANNUsed::Pointer ann1Ptr, ann2Ptr;
     ann1Ptr.reset((ANNUsed *) ann1);
     ann2Ptr.reset((ANNUsed *) ann2);
     return gs->Run(ann1Ptr, ann2Ptr, record);
@@ -134,7 +134,7 @@ export_fn int GACPCount(std::intptr_t ga) {
     return ((GAUsed *) ga)->CheckpointSize;
 }
 export_fn intptr_t GAGetANN(std::intptr_t ga, int idx) {
-    return (intptr_t) &(((GAUsed *) ga)->ANNs[idx]);
+    return (intptr_t) &(((GAUsed *) ga)->RunnerANNs.Storage[idx]);
 }
 export_fn intptr_t GAGetSimulator(intptr_t ga) {
     return (intptr_t) &((GAUsed *) ga)->Simulator;

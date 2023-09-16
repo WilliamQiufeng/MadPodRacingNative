@@ -15,6 +15,7 @@ template<int Layers>
 class ANN {
     using carr = std::unique_ptr<float[]>;
 public:
+    typedef std::shared_ptr<ANN<Layers>> Pointer;
     constexpr static const int LayersCount = Layers;
     constexpr static const float WeightPower = 1.0f, BiasPower = 1.0f;
     std::array<int, Layers + 1> NeuronOffset;

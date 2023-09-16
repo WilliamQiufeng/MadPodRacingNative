@@ -18,7 +18,7 @@ int main() {
 
     std::cout << ga.Load(SaveBinPath) << std::endl;
     ga.SetupStatsCsvFile(StatsLogPath);
-//    ga.ANNs[0]->WriteCode("out.cpp");
+//    ga.RunnerANNs.Storage[0]->WriteCode("out.cpp");
     while (true) {
         ga.Generation();
         auto end = high_resolution_clock::now();
@@ -31,6 +31,6 @@ int main() {
     }
     ga.Save(SaveBinPath);
     ga.SavePlain(SaveWeightsPath);
-    ga.ANNs[0]->WriteCode(SaveCodePath);
+    ga.RunnerANNs.Storage[0]->WriteCode(SaveCodePath);
     return 0;
 }

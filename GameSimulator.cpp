@@ -12,7 +12,6 @@ GameSimulator::GameSimulator(int totalLaps) : TotalLaps(totalLaps) {
 
 void GameSimulator::Setup(GAUsed *ga) {
     GA = ga;
-    Pods.reset(new Pod[PodCount]);
     for (int i = 0; i < PodCount; i++) {
         Vec pos = GA->Checkpoints[0] + UnitRight.Rotate(M_PI / PodsPerSide * i) * Pod::Diameter * 1.1;
         Pods[i] = Pod{
@@ -32,7 +31,7 @@ void GameSimulator::Setup(GAUsed *ga) {
     }
 }
 
-void GameSimulator::UpdatePodAI(int podIndex) const {
+void GameSimulator::UpdatePodAI(int podIndex) {
     int currentNeuron = 0;
     Pod& currentPod = Pods[podIndex];
     ANNUsed& ann = *(podIndex < PodsPerSide ? ANN1 : ANN2);
@@ -92,7 +91,7 @@ double Pod::CheckCollision(const Pod& other) const {
     return CollisionTime(Velocity, other.Velocity, Position, other.Position, Radius, Radius);
 }
 
-void GameSimulator::MoveAndCollide() const {
+void GameSimulator::MoveAndCollide() {
     const double maxTime = 1e9;
     double minNextCldTime = maxTime;
     int mctI, mctJ; // if min exists, the two collided object index
@@ -218,7 +217,7 @@ bool GameSimulator::Tick() {
     return true;
 }
 
-void GameSimulator::SetANN(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2) {
+void GameSimulator::SetANN(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2) {
 //    ANN1 = std::move(ann1);
 //    ANN2 = std::move(ann2);
     ANN1 = std::move(ann1);
@@ -271,7 +270,7 @@ double GameSimulator::Accuracy() {
     return std::max(Fitness1, Fitness2) / (double) maxFitness;
 }
 
-bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
+bool GameSimulator::Run(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record) {
     Reset(GA);
     SetANN(std::move(ann1), std::move(ann2));
     if (record) Snapshots.clear();
@@ -283,7 +282,7 @@ bool GameSimulator::Run(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> 
     return ANN1Won;
 }
 
-bool GameSimulator::RunForCompletion(std::shared_ptr<ANNUsed> ann1, std::shared_ptr<ANNUsed> ann2, bool record) {
+bool GameSimulator::RunForCompletion(ANNUsed::Pointer ann1, ANNUsed::Pointer ann2, bool record) {
     Reset(GA);
     SetANN(std::move(ann1), std::move(ann2));
     if (record) Snapshots.clear();
