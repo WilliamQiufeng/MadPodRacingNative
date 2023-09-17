@@ -13,7 +13,8 @@ int main() {
     const std::string SaveName = "test0917";
     const auto SaveBinPath = SaveName + ".bin";
     const auto SaveWeightsPath = SaveName + ".weights.txt";
-    const auto SaveCodePath = SaveName + ".cpp";
+    const auto SaveRunnerCodePath = SaveName + ".runner.cpp";
+    const auto SaveDefenderCodePath = SaveName + ".defender.cpp";
     const auto StatsLogPath = SaveName + ".stats.csv";
     std::cout.precision(2);
     std::cout << std::fixed;
@@ -29,10 +30,11 @@ int main() {
         auto durMin = totalMin - durHrs * 60;
         auto durSec = duration_cast<seconds>(end - start).count() - durHrs * 3600 - durMin * 60;
         std::cout << "Time total: " << durHrs << " hr " << durMin << " min " << durSec << " s" << std::endl;
-        if (totalMin >= 1) break;
+        if (totalMin >= 5) break;
     }
     ga.Save(SaveBinPath);
     ga.SavePlain(SaveWeightsPath);
-    ga.RunnerANNs.Storage[0].ANN->WriteCode(SaveCodePath);
+    ga.RunnerANNs.Storage[0].ANN->WriteCode(SaveRunnerCodePath);
+    ga.DefenderANNs.Storage[0].ANN->WriteCode(SaveDefenderCodePath);
     return 0;
 }

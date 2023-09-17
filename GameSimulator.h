@@ -36,6 +36,7 @@ struct SelfPodEncodeInfo {
 };
 
 typedef double fitness_t;
+typedef std::minstd_rand rng_t;
 enum class PodRole {
     Unknown,
     RunnerPod,
@@ -114,7 +115,7 @@ public:
     std::map<ANNUsed::Pointer, double> FitnessBuffer;
     std::discrete_distribution<int> DistributionSelection;
     std::random_device RandomDevice;
-    std::mt19937 RNG;
+    rng_t RNG;
     std::array<int, Population> SelectionWeights;
     std::array<int, ANNUsed::LayersCount> Nodes;
     constexpr static const int SelectionWeightBias = Population / 3;
@@ -184,6 +185,7 @@ public:
     constexpr const static int CPRadius = 600, CPRadiusSq = CPRadius * CPRadius;
     constexpr const static int CPDiameter = CPRadius * 2, CPDiameterSq = CPDiameter * CPDiameter;
     constexpr static const Vec FieldSize{16000, 8000};
+    constexpr static const int MaxTick = 1000;
     static float FieldDiagonalLength;
     bool ANN1Won, GameFinished, AllCheckpointsCompleted;
     std::vector<Snapshot> Snapshots;
@@ -263,7 +265,7 @@ public:
     constexpr static const int NeedCompletionPopulation = Population / 6;
 private:
     std::random_device RandomDevice;
-    std::mt19937 RNG;
+    rng_t RNG;
     std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x / 4};
     std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y / 4};
     std::uniform_int_distribution<int> DistributionCPCount{3, 5};
@@ -384,7 +386,7 @@ public:
         if (LogStats) {
             StatsCsvFile << GenerationCount << "," << CheckpointSize << "," << Accuracy << "," << MinAccuracy << ","
                          << MaxAccuracy << ","
-                         << LastRoundCompletionCount
+                         << LastRoundCompletionCount << ","
                          << ((int) forCompletion) << std::endl;
         }
         return true;
@@ -438,12 +440,11 @@ public:
                                     proponent1, proponent2,
                                     opponent1, opponent2
                             });
-                    if (!ann1Won) {
+                    if (RunnerANNs.Storage[i].Fitness < RunnerANNs.Storage[i + separation].Fitness) {
                         std::swap(RunnerANNs.Storage[i], RunnerANNs.Storage[i + separation]);
+                    }
+                    if (DefenderANNs.Storage[i].Fitness < DefenderANNs.Storage[i + separation].Fitness) {
                         std::swap(DefenderANNs.Storage[i], DefenderANNs.Storage[i + separation]);
-//                        std::cout << "L";
-                    } else {
-//                        std::cout << "W";
                     }
                     count++;
                     auto acc = Simulator.Accuracy();

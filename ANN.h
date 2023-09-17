@@ -28,7 +28,7 @@ public:
     constexpr static const std::array<int, Layers> DefaultNodes = {18, 31, 7, 2};
 private:
     std::random_device RandomDevice;
-    std::mt19937 RNG;
+    std::minstd_rand RNG;
     std::uniform_real_distribution<float> Distribution;
     std::uniform_real_distribution<float> Distribution01;
     std::uniform_int_distribution<int> WeightDistribution, BiasDistribution;

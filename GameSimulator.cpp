@@ -102,10 +102,10 @@ void GameSimulator::MoveAndCollide() {
     while (remainTime > 0) {
         for (int i = 0; i < TotalPods; i++) {
             auto& pod = Pods[i];
-            if (!pod.IsEnabled()) continue;
+            if (pod.IsOut) continue; // Skip disabled
             for (int j = i + 1; j < TotalPods; j++) {
                 auto& anotherPod = Pods[j];
-                if (!pod.IsEnabled()) continue;
+                if (pod.IsOut) continue;
                 if (i == lastI && j == lastJ) continue;
                 auto collideTime = pod.CheckCollision(anotherPod);
                 if (collideTime <= 0 || collideTime > remainTime) continue;
@@ -125,14 +125,14 @@ void GameSimulator::MoveAndCollide() {
         if (minNextCldTime > remainTime) { // No more collisions
             for (int i = 0; i < TotalPods; i++) {
                 auto& pod = Pods[i];
-                if (!pod.IsEnabled()) continue;
+                if (pod.IsOut) continue;
                 pod.Position += pod.Velocity * remainTime;
             }
             break;
         }
         for (int i = 0; i < TotalPods; i++) {
             auto& pod = Pods[i];
-            if (!pod.IsEnabled()) continue;
+            if (pod.IsOut) continue;
             pod.Position += pod.Velocity * minNextCldTime;
         }
         auto& pi = Pods[mctI], & pj = Pods[mctJ];
@@ -157,7 +157,7 @@ bool GameSimulator::Tick() {
         int companionPodIdx = (i < PodsPerSide ? 0 : PodsPerSide) + !(i % 2);
         Pod& companionPod = Pods[companionPodIdx];
         // 100+ turns not reaching a checkpoint: dead
-        if (!pod.IsEnabled()) continue;
+        if (pod.IsOut) continue;
         // Check checkpoint collision
         if ((pod.Position - GA->Checkpoints[pod.NextCheckpointIndex]).SqDist() <= CPRadiusSq) {
             pod.NextCheckpointIndex++;
@@ -168,12 +168,7 @@ bool GameSimulator::Tick() {
             }
             // Goes back to first checkpoint after all laps
             if (pod.Lap >= TotalLaps && pod.NextCheckpointIndex != 0) {
-                pod.Finished = true;
-                // First one finished wins.
-                ANN1Won = !pod.IsEnemy;
-                GameFinished = true;
                 AllCheckpointsCompleted = true;
-                return false;
             }
             pod.NonCPTicks = 0;
         } else {
@@ -200,27 +195,23 @@ bool GameSimulator::Tick() {
     }
     // If all pods are out or one pod has finished: return false
     // Else return true
-    bool allDisabled = true, allOut = true;
+    bool allOut = true;
     int finished1 = 0, finished2 = 0;
     for (int i = 0; i < TotalPods; i++) {
         auto& pod = Pods[i];
         if (pod.Finished) {
             (pod.IsEnemy ? finished2 : finished1)++;
-        } else if (pod.IsEnabled()) allDisabled = false;
+        }
         if (!pod.IsOut) allOut = false;
     }
-    if (!allDisabled) CurrentTick++;
-    else if (!allOut) { // Some have finished
+    if (allOut) return false;
+    if (CurrentTick > MaxTick) { // Some have finished
 //        std::cout << "Finish: " << finished1 << " to " << finished2 << std::endl;
         ANN1Won = finished1 >= finished2;
         GameFinished = true;
         return false;
-    } else { // All out
-        CalculateFitness();
-        ANN1Won = SideAverageFitness(0) > SideAverageFitness(PodsPerSide);
-        GameFinished = true;
-        return false;
     }
+    CurrentTick++;
     return true;
 }
 
@@ -248,9 +239,8 @@ fitness_t GameSimulator::RunnerFitness(int podIndex) {
     auto& controller = Controllers[podIndex];
     auto& pod = Pods[podIndex];
     auto totalCheckpoints = Laps * GA->CheckpointSize;
-    auto maximumFitnessPossible = 1000 + 200;
-    controller.Fitness = controller.Progress * 1000 - CurrentTick * 10.0 / totalCheckpoints;
-    if (pod.Finished) controller.Fitness += 100; // ?
+    auto maximumFitnessPossible = 2000 + 100;
+    controller.Fitness = controller.Progress * 1000;
     if (pod.Boosted) controller.Fitness += 100;
     // Maximum = Laps * CheckpointCount * 1000 + 3000 + 200
     controller.Fitness /= maximumFitnessPossible;
@@ -273,7 +263,7 @@ fitness_t GameSimulator::DefenderFitness(int podIndex) {
         enemyMaxProgress = std::max(enemyMaxProgress, Controllers[i].Progress);
     }
     collisionRating += 0.025 * pod.EnemyCollisionCount;
-    blockingEffectiveness = (selfMaxProgress - enemyMaxProgress) * 0.2;
+    blockingEffectiveness = (selfMaxProgress - enemyMaxProgress) * 0.5;
     controller.Fitness = (collisionRating + blockingEffectiveness) / 2;
     return controller.Fitness;
 }
@@ -381,7 +371,7 @@ PodEncodeInfo Pod::Encode(Pod& relativeTo) const {
 }
 
 bool Pod::IsEnabled() const {
-    return !IsOut && !Finished;
+    return !IsOut;
 }
 
 SelfPodEncodeInfo Pod::EncodeSelf() const {
