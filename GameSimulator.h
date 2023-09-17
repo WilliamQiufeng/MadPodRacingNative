@@ -35,7 +35,7 @@ struct SelfPodEncodeInfo {
     void Write(ANNUsed& ann, int& currentNeuron) const;
 };
 
-typedef int fitness_t;
+typedef double fitness_t;
 enum class PodRole {
     Unknown,
     RunnerPod,
@@ -61,6 +61,8 @@ struct Pod {
     bool Finished = false;
     bool IsCollided = false;
     int CPPassed = 0;
+    int CollisionCount = 0;
+    int EnemyCollisionCount = 0;
 
     constexpr const static float NormalMass = 1, ShieldMass = 10;
     constexpr const static int Radius = 400, RadiusSq = Radius * Radius;
@@ -79,7 +81,7 @@ struct Pod {
 
 void WriteCheckpoint(ANNUsed& ann, int& currentNeuron, Vec& cpPos, Pod& pod);
 
-template<int Population = 128>
+template<int Population = 256>
 class GA;
 
 typedef GA<> GAUsed;
@@ -90,10 +92,17 @@ struct Controller {
     ANNUsed::Pointer ANN;
     PodRole Role;
     fitness_t Fitness;
+    /**
+     * How much [0..1] of all the laps has the pod travelled
+     */
+    double Progress;
 };
 
 template<int Population>
 using ControllerStorage = std::array<Controller, Population>;
+template<int Population>
+using RefControllerStorage = std::array<Controller *, Population>;
+
 template<int Population>
 class ANNPopulation {
     struct RandomSelectionResult {
@@ -104,6 +113,7 @@ public:
     ControllerStorage<Population> Storage;
     std::map<ANNUsed::Pointer, double> FitnessBuffer;
     std::discrete_distribution<int> DistributionSelection;
+    std::random_device RandomDevice;
     std::mt19937 RNG;
     std::array<int, Population> SelectionWeights;
     std::array<int, ANNUsed::LayersCount> Nodes;
@@ -112,7 +122,7 @@ public:
     constexpr static const float CrossoverProbability = 0.5f;
     constexpr static const float MutateProbability = 0.06f;
 
-    ANNPopulation(decltype(RNG)& rng) : RNG(rng) {
+    ANNPopulation() : RNG(RandomDevice()) {
 
         for (int i = 0; i < Population; i++) {
             SelectionWeights[i] = Population - i + SelectionWeightBias;
@@ -122,11 +132,11 @@ public:
 
     void Initialize(std::array<int, ANNUsed::LayersCount> nodes, PodRole assignedRole) {
         Nodes = nodes;
-        for (auto& [ann, role, fitness]: Storage) {
-            ann = std::make_shared<ANNUsed>();
-            ann->InitializeSpace(nodes);
-            ann->Randomize();
-            role = assignedRole;
+        for (auto& controller: Storage) {
+            controller.ANN = std::make_shared<ANNUsed>();
+            controller.ANN->InitializeSpace(nodes);
+            controller.ANN->Randomize();
+            controller.Role = assignedRole;
         }
     }
 
@@ -158,6 +168,10 @@ public:
 };
 
 class GameSimulator {
+    fitness_t RunnerFitness(int podIndex);
+
+    fitness_t DefenderFitness(int podIndex);
+
 public:
     std::array<Pod, TotalPods> Pods;
     GAUsed *GA = nullptr;
@@ -180,6 +194,9 @@ public:
 
     void SetANN(ControllerStorage<TotalPods> anns);
 
+
+    void Dump(std::ostream& os);
+
     /**
      * Sets or resets pods and GA
      * @param ga GA
@@ -196,19 +213,21 @@ public:
 
     bool RunForCompletion(ControllerStorage<TotalPods> anns, bool record = false);
 
+    void SyncToStorage(RefControllerStorage<TotalPods> controllers);
+
+    void SyncMaxToStorage(int source1, int source2, Controller& syncTarget);;
+
     void Reset(GAUsed *ga);
 
-    fitness_t Fitness(fitness_t& out, int offset) const;
+    fitness_t Fitness(int podIndex, bool forceRunnerFitness = false);
 
-    fitness_t CompetitiveFitness(fitness_t& out, int offset) const;
+    void CalculateProgress();
 
-    [[nodiscard]] fitness_t MaxFitness(int offset) const;
+    [[nodiscard]] fitness_t SideAverageFitness(int offset) const;
 
     [[nodiscard]] fitness_t MaxFitnessByRole(PodRole role) const;
 
-    void CalculateFitness();
-
-    void CalculateCompetitiveFitness();
+    void CalculateFitness(bool forceRunnerFitness = false);
 
     double Accuracy();
 
@@ -237,18 +256,22 @@ public:
     int LastRoundCompletionCount = 0;
     double Accuracy = 0;
     double MaxAccuracy = 0;
+    double MinAccuracy = 0;
+    bool LastRoundIsCompletion = true;
     constexpr static const int PopulationCount = Population;
-    constexpr static const int NeedCompletionPopulation = Population / 3;
+    constexpr static const int NeedTournamentPopulation = Population / 4;
+    constexpr static const int NeedCompletionPopulation = Population / 6;
 private:
     std::random_device RandomDevice;
     std::mt19937 RNG;
     std::uniform_int_distribution<int> DistributionX{0, GameSimulator::FieldSize.x / 4};
     std::uniform_int_distribution<int> DistributionY{0, GameSimulator::FieldSize.y / 4};
     std::uniform_int_distribution<int> DistributionCPCount{3, 5};
+    std::uniform_int_distribution<> BooleanDistribution{0, 1};
     std::ofstream StatsCsvFile;
     bool LogStats = false;
 public:
-    GA() : RNG(RandomDevice()), RunnerANNs(RNG), DefenderANNs(RNG) {
+    GA() : RNG(RandomDevice()) {
     }
 
     void RandomizeCheckpoints() {
@@ -294,7 +317,6 @@ public:
         Simulator.Setup(this);
     }
 
-
     bool Tick() {
         bool cont = false;
         cont |= Simulator.Tick();
@@ -315,10 +337,17 @@ public:
 
     bool Generation() {
         auto start = high_resolution_clock::now();
-        Accuracy = MaxAccuracy = 0;
-        std::cout << "Last round completed: " << LastRoundCompletionCount << ", needed " << NeedCompletionPopulation
+        Accuracy = 0;
+        MaxAccuracy = std::numeric_limits<decltype(MaxAccuracy)>::min();
+        MinAccuracy = std::numeric_limits<decltype(MaxAccuracy)>::max();
+        auto forCompletion = LastRoundIsCompletion ?
+                             LastRoundCompletionCount < NeedTournamentPopulation :
+                             LastRoundCompletionCount < NeedCompletionPopulation;
+        LastRoundIsCompletion = forCompletion;
+        std::cout << "Last round completed: " << LastRoundCompletionCount
+                  << (forCompletion ? " Completion" : " Tournament")
                   << std::endl;
-        auto forCompletion = LastRoundCompletionCount < NeedCompletionPopulation;
+
 //        forCompletion = true;
         GenerationStart();
 //        for (int i = 0; i < 3; i++)
@@ -340,10 +369,9 @@ public:
                 Simulator.RunForCompletion({proponentRunner, proponentDefender, opponentRunner, opponentDefender});
             } else {
                 Simulator.Run({proponentRunner, proponentDefender, opponentRunner, opponentDefender});
-                Simulator.CalculateFitness();
             }
-            std::cout << i << " against " << opponentRunnerIdx << ": " << Simulator.MaxFitness(0) << " to "
-                      << Simulator.MaxFitness(PodsPerSide);
+            std::cout << i << " against " << std::setfill('0') << std::setw(3) << opponentRunnerIdx << ": ";
+            Simulator.Dump(std::cout);
             for (int j = 0; j < TotalPods; j++) {
                 std::cout << " " << Simulator.Pods[j].CPPassed;
             }
@@ -354,8 +382,10 @@ public:
         std::cout << "Accuracy = " << Accuracy * 100 << "%" << std::endl;
         std::cout << "Max accuracy = " << MaxAccuracy * 100 << "%" << std::endl;
         if (LogStats) {
-            StatsCsvFile << GenerationCount << "," << CheckpointSize << "," << Accuracy << "," << MaxAccuracy << ","
-                         << LastRoundCompletionCount << std::endl;
+            StatsCsvFile << GenerationCount << "," << CheckpointSize << "," << Accuracy << "," << MinAccuracy << ","
+                         << MaxAccuracy << ","
+                         << LastRoundCompletionCount
+                         << ((int) forCompletion) << std::endl;
         }
         return true;
     }
@@ -365,11 +395,13 @@ public:
             auto& runnerController = RunnerANNs.Storage[i];
             auto& defenderController = DefenderANNs.Storage[i];
             Simulator.RunForCompletion({runnerController, defenderController, runnerController, defenderController});
+            Simulator.SyncMaxToStorage(0, PodsPerSide, runnerController);
+            Simulator.SyncMaxToStorage(1, PodsPerSide + 1, defenderController);
             if (Simulator.AllCheckpointsCompleted) LastRoundCompletionCount++;
-            Simulator.CalculateFitness();
             auto acc = Simulator.Accuracy();
             Accuracy += acc;
             MaxAccuracy = std::max(MaxAccuracy, acc);
+            MinAccuracy = std::min(MinAccuracy, acc);
         }
         Accuracy /= Population;
         RunnerANNs.SortByFitness();
@@ -386,9 +418,29 @@ public:
             while (separation) {
                 for (int i = 0; i < separation; i++) {
                     // former lost. swap with latter.
-                    auto ann1Won = Simulator.Run(RunnerANNs.Storage[i], RunnerANNs.Storage[i + separation]);
+                    auto proponent1 = &RunnerANNs.Storage[i];
+                    auto proponent2 = &DefenderANNs.Storage[i];
+                    auto opponent1 = &RunnerANNs.Storage[i + separation];
+                    auto opponent2 = &DefenderANNs.Storage[i + separation];
+                    if (BooleanDistribution(RNG)) {
+                        std::swap(proponent1, proponent2);
+                    }
+                    if (BooleanDistribution(RNG)) {
+                        std::swap(opponent1, opponent2);
+                    }
+                    auto ann1Won = Simulator.Run(
+                            {
+                                    *proponent1, *proponent2,
+                                    *opponent1, *opponent2
+                            });
+                    Simulator.SyncToStorage(
+                            {
+                                    proponent1, proponent2,
+                                    opponent1, opponent2
+                            });
                     if (!ann1Won) {
                         std::swap(RunnerANNs.Storage[i], RunnerANNs.Storage[i + separation]);
+                        std::swap(DefenderANNs.Storage[i], DefenderANNs.Storage[i + separation]);
 //                        std::cout << "L";
                     } else {
 //                        std::cout << "W";
@@ -397,6 +449,7 @@ public:
                     auto acc = Simulator.Accuracy();
                     accuracySum += acc;
                     MaxAccuracy = std::max(MaxAccuracy, acc);
+                    MinAccuracy = std::max(MinAccuracy, acc);
                     if (Simulator.AllCheckpointsCompleted) thisRoundCompletionCount++;
                 }
                 separation /= 2;
@@ -410,26 +463,38 @@ public:
 
     // TODO
     void Write(std::ostream& os) {
-        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
-            ann->Write(os);
+        for (auto& controller: RunnerANNs.Storage) {
+            controller.ANN->Write(os);
+        }
+        for (auto& controller: DefenderANNs.Storage) {
+            controller.ANN->Write(os);
         }
     }
 
     void Read(std::istream& is) {
-        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
-            ann->Read(is);
+        for (auto& controller: RunnerANNs.Storage) {
+            controller.ANN->Read(is);
+        }
+        for (auto& controller: DefenderANNs.Storage) {
+            controller.ANN->Read(is);
         }
     }
 
     void WritePlain(std::ostream& os) {
-        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
-            ann->WritePlain(os);
+        for (auto& controller: RunnerANNs.Storage) {
+            controller.ANN->WritePlain(os);
+        }
+        for (auto& controller: DefenderANNs.Storage) {
+            controller.ANN->WritePlain(os);
         }
     }
 
     void ReadPlain(std::istream& is) {
-        for (auto& [ann, role, fitness]: RunnerANNs.Storage) {
-            ann->ReadPlain(is);
+        for (auto& controller: RunnerANNs.Storage) {
+            controller.ANN->ReadPlain(is);
+        }
+        for (auto& controller: DefenderANNs.Storage) {
+            controller.ANN->ReadPlain(is);
         }
     }
 
@@ -464,7 +529,7 @@ public:
     void SetupStatsCsvFile(const std::string& path) {
         StatsCsvFile.open(path);
         LogStats = true;
-        StatsCsvFile << "Generation,Checkpoints,AvgAcc,MaxAcc,Completed\n";
+        StatsCsvFile << "Generation,Checkpoints,AvgAcc,MinAcc,MaxAcc,Completed,ForCompletion\n";
     }
 
     ~GA() {

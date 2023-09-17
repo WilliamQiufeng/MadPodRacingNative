@@ -114,6 +114,12 @@ void GameSimulator::MoveAndCollide() {
                     mctJ = j;
                     minNextCldTime = collideTime;
                 }
+                pod.CollisionCount++;
+                anotherPod.CollisionCount++;
+                if ((i / PodsPerSide) != (j / PodsPerSide)) {
+                    pod.EnemyCollisionCount++;
+                    anotherPod.EnemyCollisionCount++;
+                }
             }
         }
         if (minNextCldTime > remainTime) { // No more collisions
@@ -211,7 +217,7 @@ bool GameSimulator::Tick() {
         return false;
     } else { // All out
         CalculateFitness();
-        ANN1Won = MaxFitness(0) > MaxFitness(PodsPerSide);
+        ANN1Won = SideAverageFitness(0) > SideAverageFitness(PodsPerSide);
         GameFinished = true;
         return false;
     }
@@ -222,38 +228,72 @@ void GameSimulator::SetANN(ControllerStorage<TotalPods> anns) {
     Controllers = anns;
 }
 
-fitness_t GameSimulator::Fitness(fitness_t& out, int offset) const {
-    out = 0;
-    for (int i = 0; i < PodsPerSide; i++) {
-        auto& pod = Pods[offset + i];
-        out += pod.CPPassed * 1000 - CurrentTick;
+void GameSimulator::CalculateProgress() {
+    auto totalCheckpointCount = Laps * GA->CheckpointSize;
+    for (int i = 0; i < TotalPods; i++) {
+        auto& controller = Controllers[i];
+        auto& pod = Pods[i];
+        controller.Progress = 0;
+        controller.Progress += pod.CPPassed;
         if (!pod.Finished) {
             auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
             auto checkpointDist = GA->CPDistWithBefore[pod.NextCheckpointIndex];
-            out += std::clamp<fitness_t>(checkpointDist / posDiff.Abs() * 1000, 0, 1000);
+            controller.Progress += std::clamp<double>(checkpointDist / posDiff.Abs(), 0, 1);
         }
-        if (pod.IsOut) continue;
-        if (pod.Finished) out += 3000; // ?
-        if (pod.Boosted) out += 200;
+        controller.Progress /= totalCheckpointCount;
     }
-    return out;
 }
 
-fitness_t GameSimulator::CompetitiveFitness(fitness_t& out, int offset) const {
-    out = 0;
-    for (int i = 0; i < PodsPerSide; i++) {
-        auto& pod = Pods[offset + i];
-        out += pod.CPPassed * 100;
-        if (!pod.Finished) {
-            auto posDiff = GA->Checkpoints[pod.NextCheckpointIndex] - pod.Position;
-            out += std::clamp<fitness_t>(GA->CPDistWithBefore[pod.NextCheckpointIndex] / posDiff.Abs(), 0, 30);
-        }
-    }
-    return out;
+fitness_t GameSimulator::RunnerFitness(int podIndex) {
+    auto& controller = Controllers[podIndex];
+    auto& pod = Pods[podIndex];
+    auto totalCheckpoints = Laps * GA->CheckpointSize;
+    auto maximumFitnessPossible = 1000 + 200;
+    controller.Fitness = controller.Progress * 1000 - CurrentTick * 10.0 / totalCheckpoints;
+    if (pod.Finished) controller.Fitness += 100; // ?
+    if (pod.Boosted) controller.Fitness += 100;
+    // Maximum = Laps * CheckpointCount * 1000 + 3000 + 200
+    controller.Fitness /= maximumFitnessPossible;
+    return controller.Fitness;
 }
 
-fitness_t GameSimulator::MaxFitness(int offset) const {
-    return std::max(Controllers[offset].Fitness, Controllers[offset + 1].Fitness);
+fitness_t GameSimulator::DefenderFitness(int podIndex) {
+    auto& controller = Controllers[podIndex];
+    auto& pod = Pods[podIndex];
+    double blockingEffectiveness = 0;
+    double enemyMaxProgress = 0;
+    double selfMaxProgress = 0;
+    // Average collision per enemy. 1/10 for each collision
+    double collisionRating = 0;
+    for (int i = 0; i < TotalPods; i++) {
+        if (i / PodsPerSide == podIndex / PodsPerSide) {
+            selfMaxProgress = std::max(selfMaxProgress, Controllers[i].Progress);
+            continue;
+        }
+        enemyMaxProgress = std::max(enemyMaxProgress, Controllers[i].Progress);
+    }
+    collisionRating += 0.025 * pod.EnemyCollisionCount;
+    blockingEffectiveness = (selfMaxProgress - enemyMaxProgress) * 0.2;
+    controller.Fitness = (collisionRating + blockingEffectiveness) / 2;
+    return controller.Fitness;
+}
+
+fitness_t GameSimulator::Fitness(int podIndex, bool forceRunnerFitness) {
+    if (forceRunnerFitness)
+        return RunnerFitness(podIndex);
+    switch (Controllers[podIndex].Role) {
+        case PodRole::RunnerPod:
+            return RunnerFitness(podIndex);
+        case PodRole::DefenderPod:
+            return DefenderFitness(podIndex);
+        case PodRole::Unknown:
+        case PodRole::PIDPod:
+            return 0;
+    }
+}
+
+fitness_t GameSimulator::SideAverageFitness(int offset) const {
+    return (Controllers[offset].Fitness + Controllers[offset + 1].Fitness) / 2;
 }
 
 fitness_t GameSimulator::MaxFitnessByRole(PodRole role) const {
@@ -264,22 +304,15 @@ fitness_t GameSimulator::MaxFitnessByRole(PodRole role) const {
     return maxFitness;
 }
 
-void GameSimulator::CalculateFitness() {
+void GameSimulator::CalculateFitness(bool forceRunnerFitness) {
+    CalculateProgress();
     for (int i = 0; i < TotalPods; i++) {
-        Fitness(Controllers[i].Fitness, i);
-    }
-}
-
-void GameSimulator::CalculateCompetitiveFitness() {
-    for (int i = 0; i < TotalPods; i++) {
-        CompetitiveFitness(Controllers[i].Fitness, i);
+        Fitness(i, forceRunnerFitness);
     }
 }
 
 double GameSimulator::Accuracy() {
-    CalculateFitness();
-    auto maxFitness = PodsPerSide * 25000;
-    return std::max(MaxFitness(0), MaxFitness(PodsPerSide)) / (double) maxFitness;
+    return std::max(SideAverageFitness(0), SideAverageFitness(PodsPerSide));
 }
 
 bool GameSimulator::Run(ControllerStorage<TotalPods> anns, bool record) {
@@ -291,6 +324,7 @@ bool GameSimulator::Run(ControllerStorage<TotalPods> anns, bool record) {
             Snapshots.emplace_back(*this);
         }
     }
+    CalculateFitness();
     return ANN1Won;
 }
 
@@ -303,8 +337,8 @@ bool GameSimulator::RunForCompletion(ControllerStorage<TotalPods> anns, bool rec
             Snapshots.emplace_back(*this);
         }
     }
-    CalculateFitness();
-    ANN1Won = MaxFitness(0) > MaxFitness(PodsPerSide) || Pods[0].Finished || Pods[1].Finished;
+    CalculateFitness(true);
+    ANN1Won = SideAverageFitness(0) > SideAverageFitness(PodsPerSide) || Pods[0].Finished || Pods[1].Finished;
     return ANN1Won;
 }
 
@@ -314,6 +348,16 @@ void GameSimulator::Reset(GAUsed *ga) {
     ANN1Won = false;
     GameFinished = false;
     AllCheckpointsCompleted = false;
+}
+
+void GameSimulator::Dump(std::ostream& os) {
+    for (int i = 0; i < TotalPods; i++) {
+        auto& pod = Pods[i];
+        auto& controller = Controllers[i];
+        os << "Pod " << i << "(" << (int) controller.Role << "): Progress "
+           << std::setfill(' ') << std::setw(6) << (controller.Progress * 100) << "%, "
+           << std::setfill(' ') << std::setw(7) << (controller.Fitness * 100) << "%; ";
+    }
 }
 
 GameSimulator::GameSimulator() = default;
@@ -364,6 +408,18 @@ void SelfPodEncodeInfo::Write(ANNUsed& ann, int& currentNeuron) const {
 }
 
 float GameSimulator::FieldDiagonalLength = FieldSize.Abs();
+
+void GameSimulator::SyncToStorage(RefControllerStorage<TotalPods> controllers) {
+    for (int i = 0; i < Controllers.size(); i++) {
+        controllers[i]->Fitness = Controllers[i].Fitness;
+        controllers[i]->Progress = Controllers[i].Progress;
+    }
+}
+
+void GameSimulator::SyncMaxToStorage(int source1, int source2, Controller& syncTarget) {
+    syncTarget.Fitness = std::max(Controllers[source1].Fitness, Controllers[source2].Fitness);
+    syncTarget.Progress = std::max(Controllers[source1].Progress, Controllers[source2].Progress);
+}
 
 Snapshot::Snapshot(GameSimulator& simulator) {
     CurrentTick = simulator.CurrentTick;
